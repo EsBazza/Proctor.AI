@@ -392,3 +392,39 @@ async function refreshExamAnalytics(examId: string, examTitle: string) {
     console.warn('Could not refresh exam analytics:', err);
   }
 }
+
+export async function sendStudentHeartbeatAction(input: {
+  token: string;
+  latestScreenFrame?: string | null;
+  currentQuestion?: number;
+}): Promise<{
+  success: boolean;
+  isBeingWatched?: boolean;
+  status?: string;
+  error?: string;
+}> {
+  try {
+    if (!input.token) {
+      return { success: false, error: 'Token is required' };
+    }
+
+    const res = await dbService.updateStudentHeartbeat(input.token, {
+      latestScreenFrame: input.latestScreenFrame,
+      currentQuestion: input.currentQuestion
+    });
+
+    if (!res) {
+      return { success: false, error: 'Student session not found' };
+    }
+
+    return {
+      success: true,
+      isBeingWatched: res.isBeingWatched,
+      status: res.status
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error sending heartbeat';
+    return { success: false, error: message };
+  }
+}
+

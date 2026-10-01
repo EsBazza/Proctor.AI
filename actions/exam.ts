@@ -804,4 +804,36 @@ export async function deleteQuestionAction(input: {
   }
 }
 
+export async function getLiveExamScreensAction(examId: string) {
+  try {
+    const screens = await dbService.getExamLiveScreens(examId);
+    return { success: true, screens };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error fetching live screens';
+    return { success: false, error: message };
+  }
+}
+
+export async function setStudentWatchModeAction(studentExamId: string, isBeingWatched: boolean) {
+  try {
+    const ok = await dbService.setStudentWatchMode(studentExamId, isBeingWatched);
+    return { success: ok };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error setting watch mode';
+    return { success: false, error: message };
+  }
+}
+
+export async function getSingleStudentLiveScreenAction(studentExamId: string) {
+  try {
+    const student = await dbService.getSingleStudentLiveScreen(studentExamId);
+    if (!student) return { success: false, error: 'Student not found' };
+    return { success: true, student };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error fetching student screen';
+    return { success: false, error: message };
+  }
+}
+
+
 

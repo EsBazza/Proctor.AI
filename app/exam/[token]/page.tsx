@@ -285,6 +285,7 @@ export default function StudentExamRoomPage({
         questionCount={questions.length}
         maxStrikes={studentExam.maxStrikes || 2}
         isLocked={isLocked}
+        currentQuestionIndex={activeQuestionIndex + 1}
         onLockout={() => setIsLocked(true)}
         onProctoringReady={(ready) => setIsProctoringReady(ready)}
       />

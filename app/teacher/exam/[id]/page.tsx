@@ -19,6 +19,7 @@ import { ShareExamModal } from '@/components/ShareExamModal';
 import { AdjustLockoutModal } from '@/components/AdjustLockoutModal';
 import { BadgeMarker } from '@/components/ui/BadgeMarker';
 import { Button } from '@/components/ui/Button';
+import { ExamMonitoringTabs } from '@/components/ExamMonitoringTabs';
 
 export const dynamic = 'force-dynamic';
 
@@ -139,95 +140,13 @@ export default async function TeacherExamMonitorPage({
 
       {/* Roster & Live Integrity Split */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Student Roster Table (8 cols) */}
+        {/* Enrolled Candidate Flight Board & Veyon Screen Grid (8 cols) */}
         <div className="lg:col-span-8 space-y-3">
-          <div className="flex items-center justify-between font-mono text-xs">
-            <h2 className="font-semibold text-ink uppercase tracking-wider">
-              Enrolled Candidate Flight Board
-            </h2>
-            <span className="text-ink-muted">{students.length} Candidates Enrolled</span>
-          </div>
-
-          <div className="border border-rule rounded-[2px] bg-paper overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-rule bg-ground font-mono text-[11px] uppercase tracking-wider text-ink-muted">
-                  <th className="py-2.5 px-3.5 font-semibold">Candidate</th>
-                  <th className="py-2.5 px-3 font-semibold">Status</th>
-                  <th className="py-2.5 px-3 font-semibold">Score</th>
-                  <th className="py-2.5 px-3 font-semibold">Integrity</th>
-                  <th className="py-2.5 px-3.5 text-right font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-rule font-mono">
-                {students.map((student) => (
-                  <tr key={student.id} className="hover:bg-ground/40 transition-colors">
-                    <td className="py-3 px-3.5 font-sans">
-                      <div className="font-medium text-ink">{student.studentName}</div>
-                      <div className="text-[11px] text-ink-muted font-mono mt-0.5">
-                        {student.studentEmail || `Seed PIN: ${student.accessCode}`}
-                      </div>
-                    </td>
-
-                    <td className="py-3 px-3 whitespace-nowrap">
-                      {student.status === 'PENDING' && (
-                        <span className="text-ink-muted">Ready</span>
-                      )}
-                      {student.status === 'IN_PROGRESS' && (
-                        <span className="text-ink font-semibold">In Progress</span>
-                      )}
-                      {student.status === 'LOCKED' && (
-                        <div className="space-y-1">
-                          <span className="text-signal font-semibold flex items-center gap-1">
-                            <Lock className="w-3 h-3" />
-                            <span>LOCKED ({student.strikeCount || exam.maxStrikes || 2}/{exam.maxStrikes || 2})</span>
-                          </span>
-                          <div>
-                            <UnlockStudentButton studentExamId={student.id} studentName={student.studentName} />
-                          </div>
-                        </div>
-                      )}
-                      {student.status === 'SUBMITTED' && (
-                        <span className="text-verified font-medium">Submitted</span>
-                      )}
-                      {student.status === 'FLAGGED' && (
-                        <span className="text-signal font-semibold">Flagged</span>
-                      )}
-                    </td>
-
-                    <td className="py-3 px-3 font-semibold text-ink tabular-nums whitespace-nowrap">
-                      {student.totalScore !== null ? `${student.totalScore} / ${student.maxPossibleScore} pts` : '—'}
-                    </td>
-
-                    <td className="py-3 px-3 whitespace-nowrap">
-                      {student.integrityAlertsCount > 0 ? (
-                        <BadgeMarker level="suspicious" label={`${student.integrityAlertsCount} Alert(s)`} />
-                      ) : (
-                        <BadgeMarker level="verified" label="Clean" />
-                      )}
-                    </td>
-
-                    <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <CopyStudentLinkButton
-                          accessToken={student.accessToken}
-                          studentName={student.studentName}
-                        />
-                        <Link
-                          href={`/teacher/exam/${exam.id}/preview?studentId=${student.id}`}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-[2px] bg-paper border border-rule hover:border-ink/40 text-ink text-[11px] transition-colors"
-                          title="Inspect question variant"
-                        >
-                          <Eye className="w-3 h-3 text-ink-muted" />
-                          <span>Variant</span>
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ExamMonitoringTabs
+            examId={exam.id}
+            students={students as any}
+            maxStrikes={exam.maxStrikes || 2}
+          />
         </div>
 
         {/* Live Integrity Incident Feed (4 cols) */}

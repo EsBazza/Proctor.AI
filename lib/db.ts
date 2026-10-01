@@ -38,6 +38,10 @@ export interface StudentExamRecord {
   lockedAt?: string | null;
   startedAt: string | null;
   submittedAt: string | null;
+  latestScreenFrame?: string | null;
+  lastActiveAt?: string | null;
+  currentQuestion?: number | null;
+  isBeingWatched?: boolean;
 }
 
 export interface QuestionVariantRecord {
@@ -221,7 +225,11 @@ export const dbService = {
       strikeCount: r.strikeCount ?? 0,
       lockedAt: r.lockedAt ? r.lockedAt.toISOString() : null,
       startedAt: r.startedAt ? r.startedAt.toISOString() : null,
-      submittedAt: r.submittedAt ? r.submittedAt.toISOString() : null
+      submittedAt: r.submittedAt ? r.submittedAt.toISOString() : null,
+      latestScreenFrame: r.latestScreenFrame || null,
+      lastActiveAt: r.lastActiveAt ? r.lastActiveAt.toISOString() : null,
+      currentQuestion: r.currentQuestion || null,
+      isBeingWatched: r.isBeingWatched ?? false
     }));
   },
 
@@ -763,6 +771,90 @@ export const dbService = {
     return await prisma.pastMaterial.delete({
       where: { id }
     });
+  },
+
+  updateStudentHeartbeat: async (
+    token: string,
+    data: {
+      latestScreenFrame?: string | null;
+      currentQuestion?: number | null;
+    }
+  ): Promise<{ isBeingWatched: boolean; status: string } | null> => {
+    try {
+      const updated = await prisma.studentExam.update({
+        where: { accessToken: token },
+        data: {
+          lastActiveAt: new Date(),
+          ...(data.latestScreenFrame !== undefined ? { latestScreenFrame: data.latestScreenFrame } : {}),
+          ...(data.currentQuestion !== undefined ? { currentQuestion: data.currentQuestion } : {})
+        },
+        select: {
+          isBeingWatched: true,
+          status: true
+        }
+      });
+      return updated;
+    } catch {
+      return null;
+    }
+  },
+
+  setStudentWatchMode: async (studentExamId: string, isBeingWatched: boolean): Promise<boolean> => {
+    try {
+      await prisma.studentExam.update({
+        where: { id: studentExamId },
+        data: { isBeingWatched }
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  getExamLiveScreens: async (examId: string) => {
+    const students = await prisma.studentExam.findMany({
+      where: { examId },
+      select: {
+        id: true,
+        studentName: true,
+        studentEmail: true,
+        status: true,
+        latestScreenFrame: true,
+        lastActiveAt: true,
+        currentQuestion: true,
+        strikeCount: true,
+        integrityAlertsCount: true,
+        isBeingWatched: true
+      },
+      orderBy: { studentName: 'asc' }
+    });
+    return students.map((s) => ({
+      ...s,
+      lastActiveAt: s.lastActiveAt ? s.lastActiveAt.toISOString() : null
+    }));
+  },
+
+  getSingleStudentLiveScreen: async (studentExamId: string) => {
+    const s = await prisma.studentExam.findUnique({
+      where: { id: studentExamId },
+      select: {
+        id: true,
+        studentName: true,
+        studentEmail: true,
+        status: true,
+        latestScreenFrame: true,
+        lastActiveAt: true,
+        currentQuestion: true,
+        strikeCount: true,
+        integrityAlertsCount: true,
+        isBeingWatched: true
+      }
+    });
+    if (!s) return null;
+    return {
+      ...s,
+      lastActiveAt: s.lastActiveAt ? s.lastActiveAt.toISOString() : null
+    };
   }
 };
 

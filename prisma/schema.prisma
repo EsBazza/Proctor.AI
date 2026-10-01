@@ -51,6 +51,10 @@ model StudentExam {
   cheatingFlagged      Boolean           @default(false)
   startedAt            DateTime?
   submittedAt          DateTime?
+  latestScreenFrame    String?           @db.Text
+  lastActiveAt         DateTime?
+  currentQuestion      Int?
+  isBeingWatched       Boolean           @default(false)
   
   exam                 Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
   questions            QuestionVariant[]

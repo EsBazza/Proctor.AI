@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Shield, AlertTriangle, Monitor, X } from 'lucide-react';
-import { logIntegrityEventWithSequenceAction } from '@/actions/student';
+import { logIntegrityEventWithSequenceAction, sendStudentHeartbeatAction } from '@/actions/student';
 
 interface ViolationNotice {
   eventType: 'TAB_SWITCH' | 'WINDOW_BLUR' | 'PASTE_ATTEMPT' | 'FULLSCREEN_EXIT';
@@ -23,6 +23,7 @@ interface IntegrityGuardProps {
   questionCount?: number;
   maxStrikes?: number;
   isLocked?: boolean;
+  currentQuestionIndex?: number;
   onViolation?: (count: number) => void;
   onLockout?: () => void;
   onProctoringReady?: (ready: boolean) => void;
@@ -37,6 +38,7 @@ export function IntegrityGuard({
   questionCount,
   maxStrikes = 2,
   isLocked = false,
+  currentQuestionIndex,
   onViolation,
   onLockout,
   onProctoringReady
@@ -146,6 +148,72 @@ export function IntegrityGuard({
 
     return () => clearInterval(interval);
   }, [isScreenSharing, captureFrame]);
+
+  // Compact 480px WebP thumbnail for live Veyon flight board (~15-20KB)
+  const captureThumbnail = useCallback((): string | null => {
+    if (!videoRef.current || !streamRef.current) return null;
+    const video = videoRef.current;
+    if (video.videoWidth === 0 || video.videoHeight === 0) return null;
+
+    try {
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(1, 480 / video.videoWidth);
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/webp', 0.45);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Veyon-Style Adaptive Screen Heartbeat:
+  // Base rate: pushes thumbnail every 30s for the teacher's classroom flight board.
+  // Accelerated rate: if the teacher clicks to inspect this student, pulses at 2s!
+  const isBeingWatchedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isScreenSharing || isLocked) return;
+
+    let timeoutId: NodeJS.Timeout;
+    let isCancelled = false;
+
+    const sendHeartbeat = async () => {
+      try {
+        const thumb = captureThumbnail();
+        const res = await sendStudentHeartbeatAction({
+          token,
+          latestScreenFrame: thumb || undefined,
+          currentQuestion: currentQuestionIndex
+        });
+
+        if (res && res.success) {
+          isBeingWatchedRef.current = !!res.isBeingWatched;
+        }
+      } catch {
+        // Non-blocking background heartbeat
+      }
+
+      if (!isCancelled) {
+        // If teacher is currently inspecting this student in real-time, pulse every 2s
+        // Otherwise, run on the standard 30s Veyon overview interval.
+        const nextInterval = isBeingWatchedRef.current ? 2000 : 30000;
+        timeoutId = setTimeout(sendHeartbeat, nextInterval);
+      }
+    };
+
+    // First pulse immediately after screen share starts
+    timeoutId = setTimeout(sendHeartbeat, 1500);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [isScreenSharing, isLocked, token, currentQuestionIndex, captureThumbnail]);
 
   const reportViolation = useCallback(
     async (
