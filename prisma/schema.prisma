@@ -1,0 +1,133 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Exam {
+  id                     String         @id @default(cuid())
+  title                  String
+  subject                String
+  lessonContent          String
+  language               String         @default("English") // "English" | "Tagalog" | "Bisaya"
+  questionTypes          String         @default("MCQ,TRUE_FALSE,SHORT_ANSWER,ESSAY") // Comma-separated list of formats
+  accessCode             String         @unique // 6-digit access code e.g. "849201"
+  durationMinutes        Int            @default(30)
+  totalQuestions         Int            @default(5)
+  timeSavedHoursEstimate Float          @default(4.0)
+  googleCourseId         String?
+  googleCourseName       String?
+  googleCourseWorkId     String?
+  googleCourseWorkUrl    String?
+  teacherEmail           String?
+  status                 String         @default("ACTIVE") // "ACTIVE" | "CLOSED"
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  
+  studentExams           StudentExam[]
+  analytics              ExamAnalytics?
+}
+
+model StudentExam {
+  id                   String            @id @default(cuid())
+  examId               String
+  studentName          String
+  studentEmail         String?
+  accessCode           String?           // Unique individual access code e.g. "849201"
+  accessToken          String            @unique @default(cuid()) // /exam/[accessToken]
+  googleCourseWorkId   String?           // Google Classroom coursework ID for this student
+  googleCourseWorkUrl  String?           // Direct link to assignment in Google Classroom
+  status               String            @default("PENDING") // "PENDING" | "IN_PROGRESS" | "LOCKED" | "SUBMITTED" | "FLAGGED"
+  totalScore           Float?
+  maxPossibleScore     Float             @default(100)
+  integrityAlertsCount Int               @default(0)
+  strikeCount          Int               @default(0)
+  lockedAt             DateTime?
+  cheatingFlagged      Boolean           @default(false)
+  startedAt            DateTime?
+  submittedAt          DateTime?
+  
+  exam                 Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
+  questions            QuestionVariant[]
+  integrityLogs        IntegrityLog[]
+
+  @@index([studentEmail])
+  @@index([examId])
+}
+
+model QuestionVariant {
+  id              String       @id @default(cuid())
+  studentExamId   String
+  questionIndex   Int          // 1, 2, 3...
+  type            String       // "MCQ" | "TRUE_FALSE" | "SHORT_ANSWER" | "ESSAY" | "FILL_IN_BLANK" | "MATCHING" | "IDENTIFICATION"
+  conceptTested   String       @default("Core Concept")
+  difficulty      String       @default("MEDIUM") // "EASY" | "MEDIUM" | "HARD"
+  prompt          String
+  options         String?      // JSON array string: ["A", "B", "C", "D"] or matching columns
+  correctAnswer   String
+  studentAnswer   String?
+  isCorrect       Boolean?
+  pointsAwarded   Float?
+  maxPoints       Float        @default(10)
+  aiExplanation   String?      // Gemini AI grading explanation
+  
+  studentExam     StudentExam  @relation(fields: [studentExamId], references: [id], onDelete: Cascade)
+
+  @@index([studentExamId])
+}
+
+model IntegrityLog {
+  id               String       @id @default(cuid())
+  studentExamId    String
+  eventType        String       // "TAB_SWITCH" | "WINDOW_BLUR" | "PASTE_ATTEMPT" | "FULLSCREEN_EXIT"
+  severity         String       @default("LOW") // "LOW" | "MEDIUM" | "HIGH"
+  details          String?
+  screenshotBase64 String?      @db.Text
+  framesBase64     String?      @db.Text // JSON string array of 10 chronological frames (T-5s to T+5s)
+  keystrokesLog    String?      // JSON string array of keys pressed before flag
+  threatRank       String?      // "CRITICAL" | "SUSPICIOUS" | "LOW" | "BENIGN"
+  threatScore      Float?       // 0 to 100
+  aiAnalysis       String?      @db.Text // Gemini forensic summary & detected apps
+  timestamp        DateTime     @default(now())
+  
+  studentExam      StudentExam  @relation(fields: [studentExamId], references: [id], onDelete: Cascade)
+
+  @@index([studentExamId])
+}
+
+
+model ExamAnalytics {
+  id                 String   @id @default(cuid())
+  examId             String   @unique
+  classAverage       Float
+  highestScore       Float?
+  lowestScore        Float?
+  completionRate     Float?
+  topMissedConcepts  String   // JSON array of strings or { concept, errorRate }
+  aiSynthesisSummary String   // AI cohort performance & learning gap analysis
+  aiRecommendations  String   // Actionable next lesson suggestions
+  updatedAt          DateTime @updatedAt
+  
+  exam               Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+}
+
+model PastMaterial {
+  id               String   @id @default(cuid())
+  teacherEmail     String?
+  fileName         String
+  fileSize         Int?
+  mimeType         String?
+  title            String?
+  subject          String?
+  extractedContent String   @db.Text
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([teacherEmail])
+  @@index([createdAt])
+}
+
