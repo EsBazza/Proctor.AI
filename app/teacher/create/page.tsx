@@ -39,6 +39,7 @@ import {
 } from '@/actions/material';
 import type { ClassroomCourse, ClassroomStudent } from '@/lib/google-classroom';
 import type { PastMaterialRecord } from '@/lib/db';
+import { AIExamGenerationModal } from '@/components/AIExamGenerationModal';
 
 export interface EnrolledStudentItem extends ClassroomStudent {
   isPresent: boolean;
@@ -1881,8 +1882,9 @@ export default function CreateExamPage() {
           <button
             type="submit"
             disabled={isSubmitting || isExtractingPdf || (!isManualRoster && importedStudents.length > 0 && importedStudents.filter((s) => s.isPresent).length === 0)}
-            className="w-full flex items-center justify-center gap-3 px-8 py-4 rounded-[2px] bg-ink hover:bg-ink/90 text-paper font-mono text-xs uppercase tracking-widest font-semibold transition-colors disabled:opacity-40 min-h-[48px]"
+            className="group relative overflow-hidden w-full flex items-center justify-center gap-3 px-8 py-4 rounded-[2px] bg-ink hover:bg-ink/90 text-paper font-mono text-xs uppercase tracking-widest font-semibold transition-all duration-200 hover:shadow-lg disabled:opacity-40 min-h-[48px] active:scale-[0.99]"
           >
+            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none animate-shimmer" />
             {isSubmitting ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -1890,14 +1892,29 @@ export default function CreateExamPage() {
               </>
             ) : (
               <>
-                <Cpu className="w-5 h-5" />
+                <Cpu className="w-5 h-5 group-hover:rotate-12 transition-transform duration-300" />
                 <span>Generate Personalized Isomorphic Exams</span>
-                <ArrowRight className="w-5 h-5" />
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform duration-300" />
               </>
             )}
           </button>
         </div>
       </form>
+
+      {/* AI Reasoning & Generation Thinking Modal */}
+      <AIExamGenerationModal
+        isOpen={isSubmitting}
+        title={title}
+        subject={subject}
+        candidateCount={
+          !isManualRoster
+            ? (importedStudents.filter((s) => s.isPresent).length || importedStudents.length || 1)
+            : (manualRosterText.split('\n').filter((l) => l.trim().length > 0).length || 1)
+        }
+        questionCount={questionCount}
+        maxStrikes={maxStrikes}
+        questionTypes={selectedQuestionTypes}
+      />
     </div>
   );
 }

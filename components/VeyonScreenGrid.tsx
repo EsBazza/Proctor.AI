@@ -273,7 +273,7 @@ export function VeyonScreenGrid({
               <div
                 key={student.id}
                 onClick={() => handleOpenInspect(student)}
-                className={`group relative rounded-[2px] border bg-paper text-xs overflow-hidden cursor-pointer transition-all duration-150 hover:shadow-lg hover:border-ink/60 flex flex-col justify-between ${
+                className={`group relative rounded-[2px] border bg-paper text-xs overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-ink/60 flex flex-col justify-between ${
                   isLocked
                     ? 'border-signal/70 ring-1 ring-signal/30'
                     : student.integrityAlertsCount > 0
