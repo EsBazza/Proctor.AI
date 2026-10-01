@@ -149,15 +149,18 @@ export function IntegrityGuard({
     return () => clearInterval(interval);
   }, [isScreenSharing, captureFrame]);
 
-  // Compact 480px WebP thumbnail for live Veyon flight board (~15-20KB)
-  const captureThumbnail = useCallback((): string | null => {
+  // High-Definition adaptive screen frame capturer:
+  // - High Def (Watch Mode): 1280px (720p HD) for crisp text, tab titles, and code (~50-70KB WebP)
+  // - Standard (Grid Mode): 800px (~25-35KB WebP) for smooth classroom overview cards
+  const captureThumbnail = useCallback((isHighDef: boolean = false): string | null => {
     if (!videoRef.current || !streamRef.current) return null;
     const video = videoRef.current;
     if (video.videoWidth === 0 || video.videoHeight === 0) return null;
 
     try {
       const canvas = document.createElement('canvas');
-      const scale = Math.min(1, 480 / video.videoWidth);
+      const targetWidth = isHighDef ? 1280 : 800;
+      const scale = Math.min(1, targetWidth / video.videoWidth);
       canvas.width = Math.round(video.videoWidth * scale);
       canvas.height = Math.round(video.videoHeight * scale);
 
@@ -165,16 +168,17 @@ export function IntegrityGuard({
       if (!ctx) return null;
 
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL('image/webp', 0.45);
+      return canvas.toDataURL('image/webp', isHighDef ? 0.65 : 0.5);
     } catch {
       return null;
     }
   }, []);
 
-  // Veyon-Style Adaptive Screen Heartbeat:
-  // Base rate: pushes thumbnail every 30s for the teacher's classroom flight board.
-  // Accelerated rate: if the teacher clicks to inspect this student, pulses at 2s!
+  // Veyon-Style Reactive Adaptive Screen Pulse:
+  // - When idle: checks watch flag every 2.5s and sends overview thumbnail every 10s.
+  // - When teacher inspects: wakes up within <=2s and streams 1280px HD frames every 1 second!
   const isBeingWatchedRef = useRef(false);
+  const lastFullFrameSentRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isScreenSharing || isLocked) return;
@@ -182,12 +186,22 @@ export function IntegrityGuard({
     let timeoutId: NodeJS.Timeout;
     let isCancelled = false;
 
-    const sendHeartbeat = async () => {
+    const pulse = async () => {
       try {
-        const thumb = captureThumbnail();
+        const now = Date.now();
+        const isWatched = isBeingWatchedRef.current;
+        // In live watch mode: send 1280px HD frame every ~1s
+        // In idle classroom mode: send 800px frame every 10s
+        const shouldSendFrame = isWatched || (now - lastFullFrameSentRef.current >= 10000);
+
+        const frame = shouldSendFrame ? captureThumbnail(isWatched) : undefined;
+        if (frame) {
+          lastFullFrameSentRef.current = now;
+        }
+
         const res = await sendStudentHeartbeatAction({
           token,
-          latestScreenFrame: thumb || undefined,
+          latestScreenFrame: frame,
           currentQuestion: currentQuestionIndex
         });
 
@@ -199,15 +213,15 @@ export function IntegrityGuard({
       }
 
       if (!isCancelled) {
-        // If teacher is currently inspecting this student in real-time, pulse every 2s
-        // Otherwise, run on the standard 30s Veyon overview interval.
-        const nextInterval = isBeingWatchedRef.current ? 2000 : 30000;
-        timeoutId = setTimeout(sendHeartbeat, nextInterval);
+        // Fast 1000ms pulse when teacher is watching;
+        // 2500ms quick check when idle (instant wake-up when teacher clicks)
+        const nextInterval = isBeingWatchedRef.current ? 1000 : 2500;
+        timeoutId = setTimeout(pulse, nextInterval);
       }
     };
 
     // First pulse immediately after screen share starts
-    timeoutId = setTimeout(sendHeartbeat, 1500);
+    timeoutId = setTimeout(pulse, 800);
 
     return () => {
       isCancelled = true;

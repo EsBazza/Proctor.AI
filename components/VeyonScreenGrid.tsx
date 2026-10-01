@@ -17,7 +17,10 @@ import {
   ExternalLink,
   ShieldAlert,
   Loader2,
-  Tv
+  Tv,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw
 } from 'lucide-react';
 import Link from 'next/link';
 import { 
@@ -53,7 +56,7 @@ export function VeyonScreenGrid({
 }: VeyonScreenGridProps) {
   const [students, setStudents] = useState<StudentScreenItem[]>(initialStudents);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(30);
+  const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(15);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'IN_PROGRESS' | 'LOCKED' | 'FLAGGED'>('ALL');
   
   // Focused student live inspection state
@@ -61,8 +64,9 @@ export function VeyonScreenGrid({
   const [focusedStudent, setFocusedStudent] = useState<StudentScreenItem | null>(null);
   const [isFullscreenModal, setIsFullscreenModal] = useState(false);
   const [focusedFrameKey, setFocusedFrameKey] = useState(0);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
 
-  // Background 30-second grid sweep
+  // Background 15-second grid sweep
   const fetchAllScreens = useCallback(async () => {
     setIsRefreshing(true);
     try {
@@ -74,17 +78,17 @@ export function VeyonScreenGrid({
       console.warn('Error refreshing screens:', err);
     } finally {
       setIsRefreshing(false);
-      setSecondsUntilRefresh(30);
+      setSecondsUntilRefresh(15);
     }
   }, [examId]);
 
-  // 30-second periodic grid polling
+  // 15-second periodic grid polling
   useEffect(() => {
     const countdown = setInterval(() => {
       setSecondsUntilRefresh((prev) => {
         if (prev <= 1) {
           fetchAllScreens();
-          return 30;
+          return 15;
         }
         return prev - 1;
       });
@@ -97,22 +101,35 @@ export function VeyonScreenGrid({
   const handleOpenInspect = async (student: StudentScreenItem) => {
     setInspectedStudentId(student.id);
     setFocusedStudent(student);
-    // Tell student client to accelerate frame stream to 2s
-    await setStudentWatchModeAction(student.id, true);
+    setZoomLevel(1);
+    // Tell student client to immediately accelerate frame stream to 1s HD
+    setStudentWatchModeAction(student.id, true);
+
+    // Immediate initial sync
+    try {
+      const res = await getSingleStudentLiveScreenAction(student.id);
+      if (res.success && res.student) {
+        setFocusedStudent(res.student as StudentScreenItem);
+        setFocusedFrameKey((k) => k + 1);
+      }
+    } catch {
+      // Non-blocking
+    }
   };
 
   // Handle closing live inspection modal
   const handleCloseInspect = async () => {
     if (inspectedStudentId) {
-      // Release student back to 30s background heartbeat to conserve bandwidth
+      // Release student back to background heartbeat to conserve bandwidth
       await setStudentWatchModeAction(inspectedStudentId, false);
     }
     setInspectedStudentId(null);
     setFocusedStudent(null);
     setIsFullscreenModal(false);
+    setZoomLevel(1);
   };
 
-  // High-frequency polling (every 1.5 seconds) while inspecting a specific student
+  // Continuous 1-second live stream polling while inspecting a specific student
   useEffect(() => {
     if (!inspectedStudentId) return;
 
@@ -133,7 +150,7 @@ export function VeyonScreenGrid({
       } catch (err) {
         console.warn('Error streaming student frame:', err);
       }
-    }, 1500);
+    }, 1000);
 
     return () => {
       isMounted = false;
@@ -356,16 +373,16 @@ export function VeyonScreenGrid({
 
       {/* FOCUSED STUDENT LIVE INSPECTION MODAL (Veyon Remote View) */}
       {inspectedStudentId && focusedStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-ground/85 backdrop-blur-md animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-ground/90 backdrop-blur-md animate-in fade-in duration-150">
           <div
-            className={`w-full bg-ground border border-rule rounded-[2px] shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
+            className={`w-full bg-ground border border-rule rounded-[2px] shadow-2xl flex flex-col overflow-hidden transition-all duration-150 ${
               isFullscreenModal
-                ? 'fixed inset-2 z-50 h-[calc(100vh-1rem)]'
-                : 'max-w-5xl max-h-[92vh]'
+                ? 'fixed inset-0 z-50 w-screen h-screen rounded-none border-none'
+                : 'w-[96vw] max-w-[1600px] h-[92vh] max-h-[96vh]'
             }`}
           >
             {/* Modal Header */}
-            <div className="p-3.5 bg-paper border-b border-rule flex items-center justify-between gap-3 shrink-0">
+            <div className="p-3 bg-paper border-b border-rule flex items-center justify-between gap-3 shrink-0">
               <div className="flex items-center gap-3 min-w-0">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                 <div className="min-w-0">
@@ -373,7 +390,7 @@ export function VeyonScreenGrid({
                     <span className="truncate">{focusedStudent.studentName}</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0 flex items-center gap-1">
                       <Radio className="w-2.5 h-2.5 animate-pulse text-emerald-400" />
-                      LIVE (1–2s Updates)
+                      LIVE HD (1s Pulse)
                     </span>
                   </div>
                   <div className="text-[11px] text-ink-muted font-mono truncate">
@@ -383,6 +400,41 @@ export function VeyonScreenGrid({
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                {/* Zoom Controls */}
+                <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded bg-ground border border-rule text-xs font-mono">
+                  <button
+                    type="button"
+                    onClick={() => setZoomLevel((z) => Math.max(1, Math.round((z - 0.25) * 100) / 100))}
+                    disabled={zoomLevel <= 1}
+                    className="p-1 rounded text-ink-muted hover:text-ink disabled:opacity-30 transition"
+                    title="Zoom Out"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="px-1 text-[11px] font-semibold text-ink min-w-[38px] text-center">
+                    {Math.round(zoomLevel * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setZoomLevel((z) => Math.min(3, Math.round((z + 0.25) * 100) / 100))}
+                    disabled={zoomLevel >= 3}
+                    className="p-1 rounded text-ink-muted hover:text-ink disabled:opacity-30 transition"
+                    title="Zoom In"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  {zoomLevel > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setZoomLevel(1)}
+                      className="p-1 rounded text-ink-muted hover:text-ink transition border-l border-rule pl-1.5 ml-0.5"
+                      title="Reset to Fit (100%)"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
                 {focusedStudent.status === 'LOCKED' && (
                   <UnlockStudentButton
                     studentExamId={focusedStudent.id}
@@ -403,7 +455,7 @@ export function VeyonScreenGrid({
                   type="button"
                   onClick={() => setIsFullscreenModal((prev) => !prev)}
                   className="p-1.5 rounded-[2px] bg-paper hover:bg-slate-800 border border-rule text-ink-muted hover:text-ink transition"
-                  title={isFullscreenModal ? 'Exit Fullscreen' : 'Fullscreen View'}
+                  title={isFullscreenModal ? 'Exit Fullscreen' : 'Fullscreen Theater View'}
                 >
                   {isFullscreenModal ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                 </button>
@@ -419,27 +471,34 @@ export function VeyonScreenGrid({
               </div>
             </div>
 
-            {/* Modal Screen Display Viewport */}
-            <div className="flex-1 bg-paper/60 p-3 sm:p-5 flex items-center justify-center overflow-auto min-h-[300px]">
+            {/* Modal Screen Display Viewport (Theater Screen) */}
+            <div className="flex-1 bg-black/95 p-2 sm:p-4 flex items-center justify-center overflow-auto min-h-[350px] relative select-none">
               {focusedStudent.latestScreenFrame ? (
-                <div className="relative max-w-full max-h-full rounded-[2px] overflow-hidden border border-rule shadow-2xl bg-ground">
+                <div 
+                  className="w-full h-full flex items-center justify-center overflow-auto"
+                  style={{ cursor: zoomLevel > 1 ? 'grab' : 'default' }}
+                >
                   <img
                     key={focusedFrameKey}
                     src={focusedStudent.latestScreenFrame}
                     alt={`${focusedStudent.studentName}'s Live Screen`}
-                    className="w-auto h-auto max-h-[70vh] object-contain mx-auto"
+                    className="w-auto h-auto max-w-full max-h-[82vh] object-contain rounded shadow-2xl transition-transform duration-150"
+                    style={{
+                      transform: `scale(${zoomLevel})`,
+                      transformOrigin: 'center center'
+                    }}
                   />
                   {/* Subtle live pulse badge */}
-                  <div className="absolute top-3 right-3 px-2 py-1 rounded bg-ground/85 backdrop-blur-sm border border-rule text-paper text-[10px] font-mono flex items-center gap-1.5">
+                  <div className="absolute top-3 right-3 px-2.5 py-1 rounded bg-ground/85 backdrop-blur-sm border border-rule text-paper text-[10px] font-mono flex items-center gap-1.5 shadow-lg">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>Live Screen Stream</span>
+                    <span>Live HD Stream</span>
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center py-16 gap-3 text-ink-muted">
-                  <Monitor className="w-10 h-10 text-slate-700 animate-pulse" />
-                  <div className="text-xs text-ink font-medium">Waiting for candidate's screen transmission...</div>
-                  <div className="text-[11px] text-ink-muted font-mono">
+                <div className="flex flex-col items-center justify-center py-20 gap-3 text-ink-muted">
+                  <Monitor className="w-12 h-12 text-slate-700 animate-pulse" />
+                  <div className="text-sm text-ink font-medium">Waiting for candidate's screen transmission...</div>
+                  <div className="text-xs text-ink-muted font-mono">
                     Ensure student has accepted screen sharing on their browser.
                   </div>
                 </div>
@@ -448,7 +507,7 @@ export function VeyonScreenGrid({
 
             {/* Modal Footer Flight Bar */}
             <div className="p-3 bg-ground border-t border-rule flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono shrink-0">
-              <div className="flex items-center gap-3 text-ink-muted">
+              <div className="flex items-center gap-3 text-ink-muted flex-wrap">
                 <span>
                   Status: <strong className={focusedStudent.status === 'IN_PROGRESS' ? 'text-verified' : 'text-signal'}>{focusedStudent.status}</strong>
                 </span>
@@ -459,13 +518,15 @@ export function VeyonScreenGrid({
                 {focusedStudent.lastActiveAt && (
                   <>
                     <span>•</span>
-                    <span>Last Received: {new Date(focusedStudent.lastActiveAt).toLocaleTimeString()}</span>
+                    <span>Last Stream Pulse: {new Date(focusedStudent.lastActiveAt).toLocaleTimeString()}</span>
                   </>
                 )}
               </div>
 
-              <div className="text-[11px] text-ink-muted">
-                Press <kbd className="px-1.5 py-0.5 rounded bg-paper border border-rule text-ink">ESC</kbd> to return to classroom grid
+              <div className="text-[11px] text-ink-muted flex items-center gap-3">
+                <span className="hidden sm:inline">Use Zoom controls or Fullscreen icon for maximum detail</span>
+                <span>•</span>
+                <span>Press <kbd className="px-1.5 py-0.5 rounded bg-paper border border-rule text-ink font-mono">ESC</kbd> to exit</span>
               </div>
             </div>
           </div>
