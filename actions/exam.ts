@@ -842,5 +842,16 @@ export async function getSingleStudentLiveScreenAction(studentExamId: string) {
   }
 }
 
+export async function getLiveExamIntegrityLogsAction(examId: string) {
+  try {
+    const logs = await dbService.getIntegrityLogsByExamId(examId);
+    return { success: true, logs };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error fetching live integrity logs';
+    return { success: false, error: message };
+  }
+}
+
+
 
 

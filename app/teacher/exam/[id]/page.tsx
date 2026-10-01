@@ -159,7 +159,7 @@ export default async function TeacherExamMonitorPage({
           </div>
 
           <div className="border border-rule rounded-[2px] bg-paper p-3.5 max-h-[580px] overflow-y-auto">
-            <ForensicSnapshotViewer logs={integrityLogs} />
+            <ForensicSnapshotViewer logs={integrityLogs} examId={exam.id} />
           </div>
         </div>
       </div>

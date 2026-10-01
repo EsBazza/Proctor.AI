@@ -110,30 +110,41 @@ export function VeyonScreenGrid({
     return () => clearInterval(countdown);
   }, [fetchAllScreens]);
 
-  // Paint Base64 frame onto canvas atomically using createImageBitmap
-  const paintFrameToCanvas = useCallback(async (frameDataUrl: string) => {
+  // Paint Base64 frame onto canvas atomically using HTMLImageElement
+  const paintFrameToCanvas = useCallback((frameDataUrl: string) => {
+    if (!frameDataUrl) return;
     try {
-      const res = await fetch(frameDataUrl);
-      const blob = await res.blob();
-      const bitmap = await createImageBitmap(blob);
-      if (canvasRef.current) {
-        const canvas = canvasRef.current;
-        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-          canvas.width = bitmap.width;
-          canvas.height = bitmap.height;
+      const img = new Image();
+      img.onload = () => {
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          const targetW = img.naturalWidth || 1280;
+          const targetH = img.naturalHeight || 720;
+          if (canvas.width !== targetW || canvas.height !== targetH) {
+            canvas.width = targetW;
+            canvas.height = targetH;
+          }
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+          }
         }
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(bitmap, 0, 0);
-        }
-      }
-      lastFrameTimeRef.current = Date.now();
-      setResolutionText(`${bitmap.width}x${bitmap.height}`);
-      setStreamState('LIVE');
+        lastFrameTimeRef.current = Date.now();
+        setResolutionText(`${img.naturalWidth || 1280}x${img.naturalHeight || 720}`);
+        setStreamState('LIVE');
+      };
+      img.src = frameDataUrl;
     } catch {
       // Non-blocking canvas paint fallback
     }
   }, []);
+
+  // Automatically paint whenever focusedStudent.latestScreenFrame is updated
+  useEffect(() => {
+    if (focusedStudent?.latestScreenFrame) {
+      paintFrameToCanvas(focusedStudent.latestScreenFrame);
+    }
+  }, [focusedStudent?.latestScreenFrame, paintFrameToCanvas]);
 
   // Handle opening live inspection modal for a specific student
   const handleOpenInspect = async (student: StudentScreenItem) => {
@@ -173,9 +184,21 @@ export function VeyonScreenGrid({
         });
     }
 
-    // 3. Immediate initial paint if thumbnail exists
-    if (student.latestScreenFrame) {
-      paintFrameToCanvas(student.latestScreenFrame);
+    // 3. Immediate initial fetch and paint
+    try {
+      const res = await getSingleStudentLiveScreenAction(student.id);
+      if (res.success && res.student) {
+        setFocusedStudent(res.student as StudentScreenItem);
+        if (res.student.latestScreenFrame) {
+          paintFrameToCanvas(res.student.latestScreenFrame);
+        }
+      } else if (student.latestScreenFrame) {
+        paintFrameToCanvas(student.latestScreenFrame);
+      }
+    } catch {
+      if (student.latestScreenFrame) {
+        paintFrameToCanvas(student.latestScreenFrame);
+      }
     }
   };
 
@@ -237,7 +260,7 @@ export function VeyonScreenGrid({
     return () => clearInterval(interval);
   }, [inspectedStudentId]);
 
-  // Fallback 2-second DB polling if socket is inactive
+  // Fallback 1-second DB polling while inspecting
   useEffect(() => {
     if (!inspectedStudentId) return;
 
@@ -253,15 +276,14 @@ export function VeyonScreenGrid({
               ...res.student
             };
           });
-          // If socket hasn't delivered a frame in >3.5s, paint fallback DB frame
-          if (res.student.latestScreenFrame && (Date.now() - lastFrameTimeRef.current > 3500)) {
+          if (res.student.latestScreenFrame) {
             paintFrameToCanvas(res.student.latestScreenFrame);
           }
         }
       } catch (err) {
         console.warn('Fallback stream poll notice:', err);
       }
-    }, 2000);
+    }, 1000);
 
     return () => {
       isMounted = false;
@@ -626,19 +648,29 @@ export function VeyonScreenGrid({
 
             {/* Modal Screen Display Viewport (Atomic Canvas Painting) */}
             <div className="flex-1 bg-black/95 p-2 sm:p-4 flex items-center justify-center overflow-auto min-h-[350px] relative select-none">
-              <div 
-                className="w-full h-full flex items-center justify-center overflow-auto"
-                style={{ cursor: zoomLevel > 1 ? 'grab' : 'default' }}
-              >
-                <canvas
-                  ref={canvasRef}
-                  className="w-auto h-auto max-w-full max-h-[82vh] object-contain rounded shadow-2xl transition-transform duration-150"
-                  style={{
-                    transform: `scale(${zoomLevel})`,
-                    transformOrigin: 'center center'
-                  }}
-                />
-              </div>
+              {focusedStudent.latestScreenFrame ? (
+                <div 
+                  className="w-full h-full flex items-center justify-center overflow-auto"
+                  style={{ cursor: zoomLevel > 1 ? 'grab' : 'default' }}
+                >
+                  <canvas
+                    ref={canvasRef}
+                    className="w-auto h-auto max-w-full max-h-[82vh] object-contain rounded shadow-2xl transition-transform duration-150"
+                    style={{
+                      transform: `scale(${zoomLevel})`,
+                      transformOrigin: 'center center'
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 gap-3 text-ink-muted">
+                  <Monitor className="w-12 h-12 text-slate-700 animate-pulse" />
+                  <div className="text-sm text-ink font-medium">Waiting for candidate's screen transmission...</div>
+                  <div className="text-xs text-ink-muted font-mono">
+                    Ensure student has accepted screen sharing on their browser.
+                  </div>
+                </div>
+              )}
 
               {/* Honest Monospace Telemetry HUD (Quiet Instrument style) */}
               <div className="absolute top-3 right-3 px-3 py-1 rounded-[2px] bg-paper/95 backdrop-blur-sm border border-rule text-ink text-[11px] font-mono flex items-center gap-2.5 shadow-md">

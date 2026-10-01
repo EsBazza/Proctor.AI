@@ -17,17 +17,52 @@ import {
 import { IntegrityLogRecord } from '@/lib/db';
 import { BadgeMarker, ThreatLevel } from '@/components/ui/BadgeMarker';
 import { Button } from '@/components/ui/Button';
+import { getLiveExamIntegrityLogsAction } from '@/actions/exam';
 
 interface ForensicSnapshotViewerProps {
   logs: (IntegrityLogRecord & { studentName?: string })[];
+  examId?: string;
 }
 
-export function ForensicSnapshotViewer({ logs }: ForensicSnapshotViewerProps) {
+export function ForensicSnapshotViewer({ logs, examId }: ForensicSnapshotViewerProps) {
+  const [currentLogs, setCurrentLogs] = useState<(IntegrityLogRecord & { studentName?: string })[]>(logs);
   const [selectedLog, setSelectedLog] = useState<(IntegrityLogRecord & { studentName?: string }) | null>(null);
   const [activeFrameIndex, setActiveFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(800);
   const [adjudicationStatus, setAdjudicationStatus] = useState<Record<string, 'DISMISSED' | 'CONFIRMED'>>({});
+
+  // Sync prop changes
+  useEffect(() => {
+    setCurrentLogs(logs);
+  }, [logs]);
+
+  // Live stream auto-sync (every 2.5s) without requiring manual page refresh
+  useEffect(() => {
+    if (!examId) return;
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      try {
+        const res = await getLiveExamIntegrityLogsAction(examId);
+        if (isMounted && res.success && res.logs) {
+          setCurrentLogs((prev) => {
+            if (res.logs.length !== prev.length || (res.logs[0]?.id !== prev[0]?.id)) {
+              return res.logs;
+            }
+            return prev;
+          });
+        }
+      } catch (err) {
+        console.warn('Incident log poll notice:', err);
+      }
+    }, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [examId]);
 
   // Parse frames array from selected log
   const parsedFrames: string[] = useMemo(() => {
@@ -91,10 +126,14 @@ export function ForensicSnapshotViewer({ logs }: ForensicSnapshotViewerProps) {
     return () => clearInterval(timer);
   }, [isPlaying, parsedFrames.length, playbackSpeed]);
 
-  if (logs.length === 0) {
+  if (currentLogs.length === 0) {
     return (
-      <div className="py-10 text-center text-xs font-mono text-ink-muted">
-        No integrity incidents recorded. All student examination sessions are clean.
+      <div className="py-10 text-center text-xs font-mono text-ink-muted space-y-2">
+        <div className="flex items-center justify-center gap-1.5 text-[10px] text-emerald-600">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span>Live Forensic Monitoring Active</span>
+        </div>
+        <p>No integrity incidents recorded. All student examination sessions are clean.</p>
       </div>
     );
   }
@@ -111,7 +150,15 @@ export function ForensicSnapshotViewer({ logs }: ForensicSnapshotViewerProps) {
   return (
     <>
       <div className="space-y-3">
-        {logs.map((log) => {
+        <div className="flex items-center justify-between pb-1 text-[11px] font-mono text-ink-muted border-b border-rule">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-ink font-semibold uppercase tracking-wider">Live Stream</span>
+          </span>
+          <span>{currentLogs.length} event{currentLogs.length === 1 ? '' : 's'}</span>
+        </div>
+
+        {currentLogs.map((log) => {
           const rawThreat = (log.threatRank || 'SUSPICIOUS').toLowerCase() as ThreatLevel;
           const status = adjudicationStatus[log.id];
 

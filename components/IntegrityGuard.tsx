@@ -213,23 +213,28 @@ export function IntegrityGuard({
     };
   }, [isScreenSharing, isLocked, token, playAlertChime]);
 
-  // Ephemeral Realtime Frame Stream + 30s DB Presence Fallback
+  // Ephemeral Realtime Frame Stream + DB Presence & Fallback Sync
+  const lastDbFrameSentRef = useRef<number>(0);
+
   useEffect(() => {
     if (!isScreenSharing || isLocked) return;
 
     let streamTimeoutId: NodeJS.Timeout;
     let isCancelled = false;
 
-    // 1. Ephemeral Frame Pushing:
-    // When teacher is watching: stream 1280px HD frame every 1.0s over socket.
-    // When idle: stream 800px overview frame every 12s over socket.
-    // Frames are broadcast ephemerally in-memory and NOT saved into PostgreSQL.
+    // Adaptive Frame Pushing:
+    // 1. If Realtime Socket is active: broadcast directly over socket.
+    // 2. In addition, sync with database:
+    //    - If watched: sync frame every 1.2s to DB so teacher always has fresh view.
+    //    - If idle: sync thumbnail every 10s to DB so classroom grid is always current.
     const streamLoop = async () => {
       try {
+        const now = Date.now();
         const isWatched = isBeingWatchedRef.current;
         const channel = realtimeChannelRef.current;
         const frame = captureThumbnail(isWatched);
 
+        // A. Send over Realtime socket if connected
         if (frame && channel) {
           frameSeqRef.current += 1;
           channel.send({
@@ -239,35 +244,44 @@ export function IntegrityGuard({
               frame,
               seq: frameSeqRef.current,
               currentQuestion: currentQuestionIndex,
-              timestamp: Date.now()
+              timestamp: now
             }
           });
         }
+
+        // B. Reliable Database Sync:
+        // Ensures grid overview cards and fallback modal ALWAYS receive live frames
+        const dbInterval = isWatched ? 1200 : 10000;
+        const shouldSendDb = !lastDbFrameSentRef.current || (now - lastDbFrameSentRef.current >= dbInterval);
+
+        if (shouldSendDb && frame) {
+          lastDbFrameSentRef.current = now;
+          const res = await sendStudentHeartbeatAction({
+            token,
+            latestScreenFrame: frame,
+            currentQuestion: currentQuestionIndex
+          });
+
+          if (res && res.success && res.isBeingWatched !== undefined) {
+            isBeingWatchedRef.current = !!res.isBeingWatched;
+            setIsBeingWatched(!!res.isBeingWatched);
+          }
+        }
       } catch {
-        // Non-blocking socket transport
+        // Non-blocking
       }
 
       if (!isCancelled) {
-        const delay = isBeingWatchedRef.current ? 1000 : 12000;
-        streamTimeoutId = setTimeout(streamLoop, delay);
+        const nextDelay = isBeingWatchedRef.current ? 1000 : 2500;
+        streamTimeoutId = setTimeout(streamLoop, nextDelay);
       }
     };
 
-    streamTimeoutId = setTimeout(streamLoop, 1000);
-
-    // 2. Slow 30-second DB Heartbeat Fallback:
-    // Updates presence in Postgres without writing heavy base64 frames to DB.
-    const heartbeatInterval = setInterval(() => {
-      sendStudentHeartbeatAction({
-        token,
-        currentQuestion: currentQuestionIndex
-      }).catch(() => {});
-    }, 30000);
+    streamTimeoutId = setTimeout(streamLoop, 600);
 
     return () => {
       isCancelled = true;
       clearTimeout(streamTimeoutId);
-      clearInterval(heartbeatInterval);
     };
   }, [isScreenSharing, isLocked, token, currentQuestionIndex, captureThumbnail]);
 
