@@ -15,9 +15,11 @@ import {
   ShieldCheck, 
   Cpu, Users,
   Clock,
-  Globe
+  Globe,
+  Shield
 } from 'lucide-react';
 import { CopyStudentLinkButton } from '@/components/CopyStudentLinkButton';
+import { TeacherQuestionList } from '@/components/TeacherQuestionList';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,6 +85,10 @@ export default async function TeacherExamPreviewPage({
           <span className="px-2.5 py-1 rounded-md bg-ground border border-rule text-ink text-xs flex items-center gap-1">
             <Clock className="w-3.5 h-3.5 text-ink-muted" />
             <span>{exam.durationMinutes} min</span>
+          </span>
+          <span className="px-2.5 py-1 rounded-md bg-ground border border-rule text-ink text-xs flex items-center gap-1 font-mono">
+            <Shield className="w-3.5 h-3.5 text-signal" />
+            <span>Policy: {exam.maxStrikes || 2} Flags</span>
           </span>
           <div className="ml-auto flex items-center gap-1.5 px-3 py-1 rounded-md bg-ground border border-rule text-ink font-mono text-xs font-bold">
             <Key className="w-3.5 h-3.5 text-amber-400" />
@@ -241,107 +247,13 @@ export default async function TeacherExamPreviewPage({
         </div>
       </div>
 
-      {/* Question Variant Cards */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-ink flex items-center gap-2">
-            <Cpu className="w-5 h-5 text-ink" />
-            <span>Questions & Master Rubric Standards ({questions.length} Items)</span>
-          </h2>
-          <span className="text-xs text-ink-muted">
-            Total Points: {questions.reduce((acc, q) => acc + q.maxPoints, 0)} pts
-          </span>
-        </div>
-
-        <div className="space-y-5">
-          {questions.map((q, idx) => {
-            const isMCQ = q.type === 'MCQ';
-            return (
-              <div
-                key={q.id}
-                className="rounded-[2px] bg-paper border border-rule p-6 space-y-4 shadow-lg hover:border-rule/80 transition"
-              >
-                {/* Question Metadata Header */}
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rule/80 pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-[2px] bg-ground border border-rule text-ink font-mono font-bold text-xs uppercase tracking-wider">
-                      Question {idx + 1}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md bg-ground text-ink text-xs font-semibold">
-                      {isMCQ ? 'Multiple Choice' : 'Short Answer'}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-ground/60 text-ink-muted">
-                      Concept: {q.conceptTested}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-ground text-ink">
-                      {q.difficulty}
-                    </span>
-                    <span className="px-2.5 py-1 rounded-[2px] bg-ground border border-rule font-mono text-xs font-bold text-ink-muted">
-                      {q.maxPoints} pts
-                    </span>
-                  </div>
-                </div>
-
-                {/* Prompt */}
-                <p className="text-ink text-base font-semibold leading-relaxed">
-                  {q.prompt}
-                </p>
-
-                {/* MCQ Options Display */}
-                {isMCQ && q.options && (
-                  <div className="space-y-2 pt-1">
-                    <div className="text-[11px] uppercase font-bold tracking-wider text-ink-muted mb-1">
-                      Answer Choices (Master Correct Choice Highlighted):
-                    </div>
-                    <div className="grid grid-cols-1 gap-2.5">
-                      {q.options.map((opt, optIdx) => {
-                        const isCorrectOption =
-                          opt.trim().toLowerCase() === q.correctAnswer.trim().toLowerCase() ||
-                          opt.trim().toLowerCase().startsWith(q.correctAnswer.trim().toLowerCase().charAt(0) + ')');
-
-                        return (
-                          <div
-                            key={optIdx}
-                            className={`p-3.5 rounded-[2px] border flex items-center justify-between text-xs transition ${
-                              isCorrectOption
-                                ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200 font-semibold'
-                                : 'bg-ground/60 border-rule text-ink'
-                            }`}
-                          >
-                            <span className="leading-relaxed">{opt}</span>
-                            {isCorrectOption && (
-                              <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-verified text-[10px] font-bold">
-                                <CheckCircle2 className="w-3.5 h-3.5 text-verified" />
-                                <span>Correct Answer</span>
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Short Answer Rubric */}
-                {!isMCQ && (
-                  <div className="rounded-[2px] bg-paper border border-rule p-4 space-y-1.5 text-xs">
-                    <div className="flex items-center gap-1.5 text-ink font-bold uppercase tracking-wider text-[11px]">
-                      <BrainCircuit className="w-4 h-4 text-ink" />
-                      <span>Master Grading Rubric & Expected Answer Benchmark:</span>
-                    </div>
-                    <p className="text-ink leading-relaxed whitespace-pre-wrap pt-0.5">
-                      {q.correctAnswer}
-                    </p>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* Question Variant Cards & Educator Editing Engine */}
+      <TeacherQuestionList
+        examId={exam.id}
+        studentExamId={selectedStudent.id}
+        studentName={selectedStudent.studentName}
+        questions={questions}
+      />
 
       {/* Bottom Navigation */}
       <div className="flex items-center justify-between pt-6 border-t border-rule">

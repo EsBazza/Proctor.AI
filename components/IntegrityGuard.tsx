@@ -21,6 +21,7 @@ interface IntegrityGuardProps {
   studentName?: string;
   durationMinutes?: number;
   questionCount?: number;
+  maxStrikes?: number;
   isLocked?: boolean;
   onViolation?: (count: number) => void;
   onLockout?: () => void;
@@ -34,6 +35,7 @@ export function IntegrityGuard({
   studentName,
   durationMinutes,
   questionCount,
+  maxStrikes = 2,
   isLocked = false,
   onViolation,
   onLockout,
@@ -191,14 +193,14 @@ export function IntegrityGuard({
         details,
         strikeCount: nextCount,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        isLockout: nextCount >= 2,
+        isLockout: nextCount >= maxStrikes,
         keystrokes: capturedKeys.length > 0 ? capturedKeys : undefined
       };
 
       setActiveViolationModal(notice);
       setViolationHistory((prev) => [...prev, notice]);
 
-      if (nextCount >= 2 && onLockout) {
+      if (nextCount >= maxStrikes && onLockout) {
         onLockout();
       }
 
@@ -463,7 +465,7 @@ export function IntegrityGuard({
                 <strong className="text-ink">Key Shortcut Forensics:</strong> System-level shortcuts (e.g. Alt+Tab, Cmd+Tab, Ctrl+C) are logged to trace application switching. Typed prose and answers are never logged.
               </li>
               <li>
-                <strong className="text-ink">Strike Limit:</strong> Accumulating 2 unverified strikes pauses your test session pending proctor re-authorization.
+                <strong className="text-ink">Strike Limit:</strong> Accumulating {maxStrikes} unverified strikes pauses your test session pending proctor re-authorization.
               </li>
             </ul>
           </div>
@@ -550,13 +552,13 @@ export function IntegrityGuard({
             <AlertTriangle className="w-4 h-4 text-caution shrink-0" />
             <div>
               <span className="font-mono uppercase font-semibold text-caution">
-                Incident Logged (Strike {violationCount} of 2):
+                Incident Logged (Strike {violationCount} of {maxStrikes}):
               </span>{' '}
               <span className="text-ink-muted">{lastAlert}. Multi-frame forensic record saved for instructor review.</span>
             </div>
           </div>
           <span className="shrink-0 px-2 py-0.5 rounded-[2px] bg-caution/20 text-ink font-mono text-xs">
-            {violationCount}/2 Strikes
+            {violationCount}/{maxStrikes} Strikes
           </span>
         </div>
       )}
@@ -594,7 +596,7 @@ export function IntegrityGuard({
             <span className={`w-1.5 h-1.5 rounded-full ${isFullscreen ? 'bg-verified' : 'bg-rule'}`} />
             <span>Fullscreen</span>
           </span>
-          <span className="font-mono text-ink-muted">Limit: 2 Strikes</span>
+          <span className="font-mono text-ink-muted">Limit: {maxStrikes} Strikes</span>
         </div>
       </div>
 
@@ -605,7 +607,7 @@ export function IntegrityGuard({
             <div className="flex items-start justify-between gap-3 border-b border-rule pb-3">
               <div className="space-y-1">
                 <div className="font-mono text-xs uppercase tracking-wider text-signal font-semibold">
-                  {activeViolationModal.isLockout ? 'Session Locked' : `Security Incident #${activeViolationModal.strikeCount} of 2`}
+                  {activeViolationModal.isLockout ? 'Session Locked' : `Security Incident #${activeViolationModal.strikeCount} of ${maxStrikes}`}
                 </div>
                 <h3 className="text-base font-semibold text-ink">
                   {activeViolationModal.isLockout ? 'Examination Suspended' : 'Integrity Event Intercepted'}

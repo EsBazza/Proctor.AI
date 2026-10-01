@@ -256,10 +256,12 @@ export async function logIntegrityEventWithSequenceAction(
       return { success: false, error: 'Invalid token' };
     }
 
-    // 1. Immediately increment strike count and enforce lockout at 2 strikes
-    const updatedStudent = await dbService.incrementStudentStrikeAndCheckLock(studentExam.id, 2);
+    const maxStrikes = studentExam.maxStrikes || 2;
+
+    // 1. Immediately increment strike count and enforce lockout at configured maxStrikes threshold
+    const updatedStudent = await dbService.incrementStudentStrikeAndCheckLock(studentExam.id, maxStrikes);
     const strikeCount = updatedStudent?.strikeCount || (studentExam.strikeCount || 0) + 1;
-    const isLocked = updatedStudent?.status === 'LOCKED' || strikeCount >= 2;
+    const isLocked = updatedStudent?.status === 'LOCKED' || strikeCount >= maxStrikes;
 
     // Pick central frame for screenshot thumbnail
     const centralSnapshot = framesBase64 && framesBase64.length > 0
@@ -280,8 +282,8 @@ export async function logIntegrityEventWithSequenceAction(
       threatRank: isLocked ? 'CRITICAL' : 'SUSPICIOUS',
       threatScore: isLocked ? 90 : 50,
       aiAnalysis: isLocked
-        ? `Examinee accumulated ${strikeCount} violation strike(s). Exam locked by automated security integrity shield.`
-        : `Violation strike #${strikeCount} logged: ${eventType}. 10-second before/after sequence captured.`
+        ? `Examinee accumulated ${strikeCount}/${maxStrikes} violation strike(s). Exam locked by automated security integrity shield.`
+        : `Violation strike #${strikeCount}/${maxStrikes} logged: ${eventType}. 10-second before/after sequence captured.`
     });
 
     // 3. Asynchronously trigger Gemini Vision Forensics on sequence in background
@@ -305,6 +307,7 @@ export async function logIntegrityEventWithSequenceAction(
     return { 
       success: true, 
       strikeCount, 
+      maxStrikes,
       isLocked 
     };
   } catch (error: unknown) {
@@ -322,6 +325,7 @@ export async function getStudentExamStatusAction(token: string) {
       success: true,
       status: studentExam.status,
       strikeCount: studentExam.strikeCount,
+      maxStrikes: studentExam.maxStrikes || 2,
       isLocked: studentExam.status === 'LOCKED'
     };
   } catch (err: unknown) {

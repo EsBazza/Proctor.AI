@@ -10,6 +10,7 @@ import {
   StudentPublishItem 
 } from '@/lib/google-classroom';
 import { prisma } from '@/lib/prisma';
+import { revalidatePath } from 'next/cache';
 
 export interface StudentRosterItem {
   name: string;
@@ -24,6 +25,7 @@ export interface CreateExamInput {
   language: 'English' | 'Tagalog' | 'Bisaya';
   durationMinutes: number;
   questionCount: number;
+  maxStrikes?: number;
   questionTypes?: string[];
   pointsMode?: 'AI_DYNAMIC' | 'FIXED' | 'BY_TYPE';
   fixedPoints?: number;
@@ -74,6 +76,7 @@ export async function createExamAction(input: CreateExamInput) {
       accessCode,
       durationMinutes: input.durationMinutes,
       totalQuestions: input.questionCount,
+      maxStrikes: input.maxStrikes || 2,
       timeSavedHoursEstimate: fatigue.manualHoursSaved,
       googleCourseId: input.googleCourseId || null,
       googleCourseName: input.googleCourseName || null,
@@ -533,7 +536,10 @@ export async function getTeacherExamPreviewAction(examId: string, studentExamId?
 
     return {
       success: true,
-      exam,
+      exam: {
+        ...exam,
+        maxStrikes: exam.maxStrikes || 2
+      },
       students: students.map((s) => ({
         id: s.id,
         studentName: s.studentName,
@@ -554,20 +560,253 @@ export async function getTeacherExamPreviewAction(examId: string, studentExamId?
         status: selectedStudent.status,
         totalScore: selectedStudent.totalScore
       },
-      questions: questions.map((q) => ({
-        id: q.id,
-        questionIndex: q.questionIndex,
-        type: q.type,
-        conceptTested: q.conceptTested,
-        difficulty: q.difficulty,
-        prompt: q.prompt,
-        options: q.options ? (JSON.parse(q.options) as string[]) : null,
-        correctAnswer: q.correctAnswer,
-        maxPoints: q.maxPoints
-      }))
+      questions: questions.map((q) => {
+        let parsedOptions: any = null;
+        if (q.options) {
+          try {
+            parsedOptions = JSON.parse(q.options);
+          } catch {
+            parsedOptions = q.options;
+          }
+        }
+        return {
+          id: q.id,
+          studentExamId: q.studentExamId,
+          questionIndex: q.questionIndex,
+          type: q.type,
+          conceptTested: q.conceptTested || 'Core Concept',
+          difficulty: q.difficulty || 'MEDIUM',
+          prompt: q.prompt,
+          options: parsedOptions,
+          correctAnswer: q.correctAnswer,
+          maxPoints: q.maxPoints,
+          aiExplanation: q.aiExplanation
+        };
+      })
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Error loading exam preview';
+    return { success: false, error: message };
+  }
+}
+
+export interface ManualQuestionPayload {
+  type: string;
+  prompt: string;
+  options?: any;
+  correctAnswer: string;
+  maxPoints: number;
+  conceptTested?: string;
+  difficulty?: string;
+  aiExplanation?: string;
+}
+
+export async function updateExamSettingsAction(
+  examId: string,
+  updates: {
+    maxStrikes?: number;
+    durationMinutes?: number;
+    title?: string;
+    subject?: string;
+    status?: string;
+  }
+) {
+  try {
+    const session = await auth();
+    if (!session || session.user?.role !== 'TEACHER') {
+      return { success: false, error: 'Unauthorized. Teacher access required.' };
+    }
+
+    const exam = await dbService.getExamById(examId);
+    if (!exam) return { success: false, error: 'Exam not found.' };
+
+    const updated = await dbService.updateExam(examId, updates);
+    revalidatePath(`/teacher/exam/${examId}`);
+    revalidatePath(`/teacher/exam/${examId}/preview`);
+    return { success: true, exam: updated };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error updating exam settings';
+    return { success: false, error: message };
+  }
+}
+
+export async function addManualQuestionAction(input: {
+  examId: string;
+  studentExamId?: string;
+  applyToAllStudents: boolean;
+  question: ManualQuestionPayload;
+}) {
+  try {
+    const session = await auth();
+    if (!session || session.user?.role !== 'TEACHER') {
+      return { success: false, error: 'Unauthorized. Teacher access required.' };
+    }
+
+    const exam = await dbService.getExamById(input.examId);
+    if (!exam) return { success: false, error: 'Exam not found.' };
+
+    const students = await dbService.getStudentExamsByExamId(input.examId);
+    if (students.length === 0) return { success: false, error: 'No enrolled students found in exam.' };
+
+    const serializedOptions = input.question.options
+      ? typeof input.question.options === 'string'
+        ? input.question.options
+        : JSON.stringify(input.question.options)
+      : null;
+
+    if (input.applyToAllStudents) {
+      for (const st of students) {
+        const existingQs = await dbService.getQuestionsByStudentExamId(st.id);
+        const nextIndex = existingQs.length + 1;
+        const qId = 'q_' + Math.random().toString(36).substring(2, 9);
+        await dbService.createQuestionVariant({
+          id: qId,
+          studentExamId: st.id,
+          questionIndex: nextIndex,
+          type: input.question.type,
+          conceptTested: input.question.conceptTested || 'Manual Addition',
+          difficulty: input.question.difficulty || 'MEDIUM',
+          prompt: input.question.prompt,
+          options: serializedOptions,
+          correctAnswer: input.question.correctAnswer,
+          studentAnswer: null,
+          isCorrect: null,
+          pointsAwarded: null,
+          maxPoints: input.question.maxPoints || 10,
+          aiExplanation: input.question.aiExplanation || null
+        });
+        await dbService.recalculateStudentExamScoreAndIndex(st.id);
+      }
+      await dbService.recalculateExamTotalQuestions(input.examId);
+    } else {
+      const targetStudentId = input.studentExamId || students[0].id;
+      const existingQs = await dbService.getQuestionsByStudentExamId(targetStudentId);
+      const nextIndex = existingQs.length + 1;
+      const qId = 'q_' + Math.random().toString(36).substring(2, 9);
+      await dbService.createQuestionVariant({
+        id: qId,
+        studentExamId: targetStudentId,
+        questionIndex: nextIndex,
+        type: input.question.type,
+        conceptTested: input.question.conceptTested || 'Manual Addition',
+        difficulty: input.question.difficulty || 'MEDIUM',
+        prompt: input.question.prompt,
+        options: serializedOptions,
+        correctAnswer: input.question.correctAnswer,
+        studentAnswer: null,
+        isCorrect: null,
+        pointsAwarded: null,
+        maxPoints: input.question.maxPoints || 10,
+        aiExplanation: input.question.aiExplanation || null
+      });
+      await dbService.recalculateStudentExamScoreAndIndex(targetStudentId);
+    }
+
+    revalidatePath(`/teacher/exam/${input.examId}`);
+    revalidatePath(`/teacher/exam/${input.examId}/preview`);
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error adding manual question';
+    return { success: false, error: message };
+  }
+}
+
+export async function updateQuestionAction(input: {
+  questionId: string;
+  examId: string;
+  studentExamId: string;
+  questionIndex: number;
+  applyToAllStudents: boolean;
+  question: ManualQuestionPayload;
+}) {
+  try {
+    const session = await auth();
+    if (!session || session.user?.role !== 'TEACHER') {
+      return { success: false, error: 'Unauthorized. Teacher access required.' };
+    }
+
+    const serializedOptions = input.question.options
+      ? typeof input.question.options === 'string'
+        ? input.question.options
+        : JSON.stringify(input.question.options)
+      : null;
+
+    if (input.applyToAllStudents) {
+      const students = await dbService.getStudentExamsByExamId(input.examId);
+      for (const st of students) {
+        const studentQs = await dbService.getQuestionsByStudentExamId(st.id);
+        const match = studentQs.find((q) => q.questionIndex === input.questionIndex);
+        if (match) {
+          await dbService.updateQuestionVariant(match.id, {
+            type: input.question.type,
+            prompt: input.question.prompt,
+            options: serializedOptions,
+            correctAnswer: input.question.correctAnswer,
+            maxPoints: input.question.maxPoints,
+            conceptTested: input.question.conceptTested,
+            difficulty: input.question.difficulty,
+            aiExplanation: input.question.aiExplanation
+          });
+          await dbService.recalculateStudentExamScoreAndIndex(st.id);
+        }
+      }
+    } else {
+      await dbService.updateQuestionVariant(input.questionId, {
+        type: input.question.type,
+        prompt: input.question.prompt,
+        options: serializedOptions,
+        correctAnswer: input.question.correctAnswer,
+        maxPoints: input.question.maxPoints,
+        conceptTested: input.question.conceptTested,
+        difficulty: input.question.difficulty,
+        aiExplanation: input.question.aiExplanation
+      });
+      await dbService.recalculateStudentExamScoreAndIndex(input.studentExamId);
+    }
+
+    revalidatePath(`/teacher/exam/${input.examId}`);
+    revalidatePath(`/teacher/exam/${input.examId}/preview`);
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error updating question';
+    return { success: false, error: message };
+  }
+}
+
+export async function deleteQuestionAction(input: {
+  questionId: string;
+  examId: string;
+  studentExamId: string;
+  questionIndex: number;
+  applyToAllStudents: boolean;
+}) {
+  try {
+    const session = await auth();
+    if (!session || session.user?.role !== 'TEACHER') {
+      return { success: false, error: 'Unauthorized. Teacher access required.' };
+    }
+
+    if (input.applyToAllStudents) {
+      const students = await dbService.getStudentExamsByExamId(input.examId);
+      for (const st of students) {
+        const studentQs = await dbService.getQuestionsByStudentExamId(st.id);
+        const match = studentQs.find((q) => q.questionIndex === input.questionIndex);
+        if (match) {
+          await dbService.deleteQuestionVariant(match.id);
+          await dbService.recalculateStudentExamScoreAndIndex(st.id);
+        }
+      }
+      await dbService.recalculateExamTotalQuestions(input.examId);
+    } else {
+      await dbService.deleteQuestionVariant(input.questionId);
+      await dbService.recalculateStudentExamScoreAndIndex(input.studentExamId);
+    }
+
+    revalidatePath(`/teacher/exam/${input.examId}`);
+    revalidatePath(`/teacher/exam/${input.examId}/preview`);
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error deleting question';
     return { success: false, error: message };
   }
 }

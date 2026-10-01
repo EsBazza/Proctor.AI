@@ -58,6 +58,7 @@ export default function CreateExamPage() {
   const [language, setLanguage] = useState<'English' | 'Tagalog' | 'Bisaya'>('English');
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [questionCount, setQuestionCount] = useState(4);
+  const [maxStrikes, setMaxStrikes] = useState(2);
   const [lessonContent, setLessonContent] = useState('');
 
   const AVAILABLE_QUESTION_TYPES = [
@@ -420,6 +421,7 @@ export default function CreateExamPage() {
         language,
         durationMinutes,
         questionCount,
+        maxStrikes,
         questionTypes: selectedQuestionTypes,
         pointsMode,
         fixedPoints,
@@ -700,7 +702,7 @@ export default function CreateExamPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-ink-muted mb-1.5">
                 Language
@@ -760,6 +762,46 @@ export default function CreateExamPage() {
                     }`}
                   >
                     {count} Qs
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                  Lockout Threshold *
+                </label>
+                <span className="text-[11px] text-ink font-mono font-semibold">{maxStrikes} Flags</span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={maxStrikes}
+                onChange={(e) => setMaxStrikes(Math.max(1, parseInt(e.target.value) || 2))}
+                className="w-full px-4 py-2.5 rounded-[2px] bg-paper border border-rule text-ink focus:outline-none focus:border-ink transition text-sm font-semibold"
+              />
+              {/* Presets */}
+              <div className="flex items-center gap-1 mt-2 flex-wrap">
+                <span className="text-[10px] text-ink-muted uppercase font-semibold">Flags:</span>
+                {[
+                  { value: 1, label: '1 (Strict)' },
+                  { value: 2, label: '2 (Std)' },
+                  { value: 3, label: '3 (Lenient)' },
+                  { value: 5, label: '5 (High)' }
+                ].map((preset) => (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    onClick={() => setMaxStrikes(preset.value)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                      maxStrikes === preset.value
+                        ? 'bg-signal text-paper font-bold'
+                        : 'bg-ground border border-rule text-ink-muted hover:text-ink'
+                    }`}
+                  >
+                    {preset.label}
                   </button>
                 ))}
               </div>

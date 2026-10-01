@@ -16,6 +16,7 @@ import { DeleteExamButton } from '@/components/DeleteExamButton';
 import { CopyButton } from '@/components/CopyButton';
 import { CopyStudentLinkButton } from '@/components/CopyStudentLinkButton';
 import { ShareExamModal } from '@/components/ShareExamModal';
+import { AdjustLockoutModal } from '@/components/AdjustLockoutModal';
 import { BadgeMarker } from '@/components/ui/BadgeMarker';
 import { Button } from '@/components/ui/Button';
 
@@ -101,10 +102,12 @@ export default async function TeacherExamMonitorPage({
 
             <ShareExamModal exam={exam} students={students} />
 
+            <AdjustLockoutModal examId={exam.id} currentMaxStrikes={exam.maxStrikes || 2} />
+
             <Link href={`/teacher/exam/${exam.id}/preview`}>
               <Button variant="secondary" size="md" className="font-mono text-xs">
                 <Eye className="w-3.5 h-3.5 mr-1.5" />
-                <span>Inspect Variants</span>
+                <span>Manage &amp; Edit Questions</span>
               </Button>
             </Link>
 
@@ -177,7 +180,7 @@ export default async function TeacherExamMonitorPage({
                         <div className="space-y-1">
                           <span className="text-signal font-semibold flex items-center gap-1">
                             <Lock className="w-3 h-3" />
-                            <span>LOCKED (2/2)</span>
+                            <span>LOCKED ({student.strikeCount || exam.maxStrikes || 2}/{exam.maxStrikes || 2})</span>
                           </span>
                           <div>
                             <UnlockStudentButton studentExamId={student.id} studentName={student.studentName} />

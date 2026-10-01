@@ -10,6 +10,7 @@ export interface ExamRecord {
   accessCode: string;
   durationMinutes: number;
   totalQuestions: number;
+  maxStrikes?: number;
   timeSavedHoursEstimate: number;
   googleCourseId?: string | null;
   googleCourseName?: string | null;
@@ -87,6 +88,7 @@ export interface StudentExamWithDetails extends StudentExamRecord {
   examSubject: string;
   durationMinutes: number;
   accessCode: string;
+  maxStrikes: number;
   strikeCount: number;
   lockedAt: string | null;
 }
@@ -118,6 +120,7 @@ export const dbService = {
         accessCode: exam.accessCode,
         durationMinutes: exam.durationMinutes,
         totalQuestions: exam.totalQuestions,
+        maxStrikes: exam.maxStrikes || 2,
         timeSavedHoursEstimate: exam.timeSavedHoursEstimate,
         googleCourseId: exam.googleCourseId ?? null,
         googleCourseName: exam.googleCourseName ?? null,
@@ -246,7 +249,8 @@ export const dbService = {
       submittedAt: r.submittedAt ? r.submittedAt.toISOString() : null,
       examTitle: r.exam.title,
       examSubject: r.exam.subject,
-      durationMinutes: r.exam.durationMinutes
+      durationMinutes: r.exam.durationMinutes,
+      maxStrikes: r.exam.maxStrikes ?? 2
     };
   },
 
@@ -274,7 +278,8 @@ export const dbService = {
       submittedAt: r.submittedAt ? r.submittedAt.toISOString() : null,
       examTitle: r.exam.title,
       examSubject: r.exam.subject,
-      durationMinutes: r.exam.durationMinutes
+      durationMinutes: r.exam.durationMinutes,
+      maxStrikes: r.exam.maxStrikes ?? 2
     };
   },
 
@@ -326,7 +331,8 @@ export const dbService = {
       submittedAt: r.submittedAt ? r.submittedAt.toISOString() : null,
       examTitle: r.exam.title,
       examSubject: r.exam.subject,
-      durationMinutes: r.exam.durationMinutes
+      durationMinutes: r.exam.durationMinutes,
+      maxStrikes: r.exam.maxStrikes ?? 2
     };
   },
 
@@ -395,7 +401,7 @@ export const dbService = {
       id: r.id,
       studentExamId: r.studentExamId,
       questionIndex: r.questionIndex,
-      type: r.type as 'MCQ' | 'SHORT_ANSWER',
+      type: r.type,
       conceptTested: r.conceptTested,
       difficulty: r.difficulty,
       prompt: r.prompt,
@@ -407,6 +413,103 @@ export const dbService = {
       maxPoints: r.maxPoints,
       aiExplanation: r.aiExplanation
     }));
+  },
+
+  createQuestionVariant: async (question: QuestionVariantRecord) => {
+    return await prisma.questionVariant.create({
+      data: {
+        id: question.id,
+        studentExamId: question.studentExamId,
+        questionIndex: question.questionIndex,
+        type: question.type,
+        conceptTested: question.conceptTested || 'Core Concept',
+        difficulty: question.difficulty || 'MEDIUM',
+        prompt: question.prompt,
+        options: question.options ?? null,
+        correctAnswer: question.correctAnswer,
+        studentAnswer: question.studentAnswer ?? null,
+        isCorrect: question.isCorrect ?? null,
+        pointsAwarded: question.pointsAwarded ?? null,
+        maxPoints: question.maxPoints || 10,
+        aiExplanation: question.aiExplanation ?? null
+      }
+    });
+  },
+
+  updateQuestionVariant: async (
+    id: string,
+    updates: Partial<QuestionVariantRecord>
+  ) => {
+    return await prisma.questionVariant.update({
+      where: { id },
+      data: {
+        ...(updates.prompt !== undefined ? { prompt: updates.prompt } : {}),
+        ...(updates.type !== undefined ? { type: updates.type } : {}),
+        ...(updates.options !== undefined ? { options: updates.options } : {}),
+        ...(updates.correctAnswer !== undefined ? { correctAnswer: updates.correctAnswer } : {}),
+        ...(updates.maxPoints !== undefined ? { maxPoints: updates.maxPoints } : {}),
+        ...(updates.conceptTested ? { conceptTested: updates.conceptTested } : {}),
+        ...(updates.difficulty ? { difficulty: updates.difficulty } : {}),
+        ...(updates.aiExplanation !== undefined ? { aiExplanation: updates.aiExplanation } : {})
+      }
+    });
+  },
+
+  deleteQuestionVariant: async (id: string) => {
+    return await prisma.questionVariant.delete({
+      where: { id }
+    });
+  },
+
+  recalculateStudentExamScoreAndIndex: async (studentExamId: string) => {
+    const questions = await prisma.questionVariant.findMany({
+      where: { studentExamId },
+      orderBy: { questionIndex: 'asc' }
+    });
+    for (let i = 0; i < questions.length; i++) {
+      if (questions[i].questionIndex !== i + 1) {
+        await prisma.questionVariant.update({
+          where: { id: questions[i].id },
+          data: { questionIndex: i + 1 }
+        });
+      }
+    }
+    const totalMaxPoints = questions.reduce((sum, q) => sum + (q.maxPoints || 0), 0);
+    await prisma.studentExam.update({
+      where: { id: studentExamId },
+      data: { maxPossibleScore: totalMaxPoints }
+    });
+    return { questionCount: questions.length, totalMaxPoints };
+  },
+
+  recalculateExamTotalQuestions: async (examId: string) => {
+    const students = await prisma.studentExam.findMany({
+      where: { examId },
+      select: { id: true }
+    });
+    if (students.length === 0) return 0;
+    const firstStudentQuestions = await prisma.questionVariant.count({
+      where: { studentExamId: students[0].id }
+    });
+    await prisma.exam.update({
+      where: { id: examId },
+      data: { totalQuestions: firstStudentQuestions }
+    });
+    return firstStudentQuestions;
+  },
+
+  updateExam: async (id: string, updates: Partial<ExamRecord>) => {
+    return await prisma.exam.update({
+      where: { id },
+      data: {
+        ...(updates.title !== undefined ? { title: updates.title } : {}),
+        ...(updates.subject !== undefined ? { subject: updates.subject } : {}),
+        ...(updates.durationMinutes !== undefined ? { durationMinutes: updates.durationMinutes } : {}),
+        ...(updates.maxStrikes !== undefined ? { maxStrikes: updates.maxStrikes } : {}),
+        ...(updates.totalQuestions !== undefined ? { totalQuestions: updates.totalQuestions } : {}),
+        ...(updates.status !== undefined ? { status: updates.status } : {})
+      }
+    });
   },
 
   updateQuestionAnswer: async (

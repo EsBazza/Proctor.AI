@@ -18,6 +18,7 @@ model Exam {
   accessCode             String         @unique // 6-digit access code e.g. "849201"
   durationMinutes        Int            @default(30)
   totalQuestions         Int            @default(5)
+  maxStrikes             Int            @default(2) // Number of integrity flags before blocking student
   timeSavedHoursEstimate Float          @default(4.0)
   googleCourseId         String?
   googleCourseName       String?

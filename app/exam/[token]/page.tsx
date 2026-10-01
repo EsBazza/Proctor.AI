@@ -283,6 +283,7 @@ export default function StudentExamRoomPage({
         studentName={studentExam.studentName}
         durationMinutes={studentExam.durationMinutes}
         questionCount={questions.length}
+        maxStrikes={studentExam.maxStrikes || 2}
         isLocked={isLocked}
         onLockout={() => setIsLocked(true)}
         onProctoringReady={(ready) => setIsProctoringReady(ready)}
