@@ -1,7 +1,7 @@
 'use server';
 
 import { dbService, ExamRecord, StudentExamRecord, QuestionVariantRecord } from '@/lib/db';
-import { generateIsomorphicExams, extractLessonFromDocument, extractLessonsFromMultipleDocuments, DocumentInput } from '@/lib/gemini';
+import { generateIsomorphicExams, extractLessonFromDocument, extractLessonsFromMultipleDocuments, DocumentInput, safeJsonParse } from '@/lib/gemini';
 import { calculateTeacherFatigueMetrics } from '@/lib/fatigue';
 import { auth } from '@/lib/auth';
 import { 
@@ -292,7 +292,7 @@ export async function getExamDetailsAction(examId: string) {
       analytics: analytics
         ? {
             ...analytics,
-            topMissedConcepts: JSON.parse(analytics.topMissedConcepts || '[]')
+            topMissedConcepts: safeJsonParse(analytics.topMissedConcepts || '[]', [])
           }
         : null
     };
@@ -561,14 +561,7 @@ export async function getTeacherExamPreviewAction(examId: string, studentExamId?
         totalScore: selectedStudent.totalScore
       },
       questions: questions.map((q) => {
-        let parsedOptions: any = null;
-        if (q.options) {
-          try {
-            parsedOptions = JSON.parse(q.options);
-          } catch {
-            parsedOptions = q.options;
-          }
-        }
+        const parsedOptions = q.options ? safeJsonParse(q.options, q.options) : null;
         return {
           id: q.id,
           studentExamId: q.studentExamId,

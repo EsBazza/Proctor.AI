@@ -5,7 +5,8 @@ import {
   gradeStudentAnswer, 
   generateCohortAnalytics, 
   analyzeViolationSequenceWithGeminiVision,
-  MatchingColumns
+  MatchingColumns,
+  safeJsonParse
 } from '@/lib/gemini';
 import { auth } from '@/lib/auth';
 
@@ -133,7 +134,7 @@ export async function getStudentExamAction(token: string) {
       conceptTested: q.conceptTested,
       difficulty: q.difficulty,
       prompt: q.prompt,
-      options: q.options ? (JSON.parse(q.options) as string[]) : null,
+      options: q.options ? safeJsonParse<string[] | MatchingColumns | null>(q.options, null) : null,
       maxPoints: q.maxPoints,
       studentAnswer: q.studentAnswer,
       isCorrect: q.isCorrect,

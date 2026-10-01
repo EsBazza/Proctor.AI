@@ -19,7 +19,10 @@ import {
   History,
   Search,
   Check,
-  FolderOpen
+  FolderOpen,
+  CheckSquare,
+  Square,
+  FolderPlus
 } from 'lucide-react';
 import { 
   createExamAction, 
@@ -27,7 +30,13 @@ import {
   StudentRosterItem 
 } from '@/actions/exam';
 import { getTeacherCoursesAction, getCourseRosterAction } from '@/actions/classroom';
-import { getPastMaterialsAction, deletePastMaterialAction } from '@/actions/material';
+import { 
+  getPastMaterialsAction, 
+  deletePastMaterialAction,
+  deleteMultiplePastMaterialsAction,
+  uploadMultipleToPastMaterialsAction,
+  savePastMaterialAction
+} from '@/actions/material';
 import type { ClassroomCourse, ClassroomStudent } from '@/lib/google-classroom';
 import type { PastMaterialRecord } from '@/lib/db';
 
@@ -193,12 +202,20 @@ export default function CreateExamPage() {
     }
   };
 
-  // Past Files & Saved Materials Library state
+  // Past Files & Saved Materials Library state (Multi-file enabled)
   const [sourceTab, setSourceTab] = useState<'upload' | 'past'>('upload');
   const [pastMaterials, setPastMaterials] = useState<PastMaterialRecord[]>([]);
   const [isLoadingPastMaterials, setIsLoadingPastMaterials] = useState(false);
   const [pastSearchQuery, setPastSearchQuery] = useState('');
-  const [selectedPastMaterialId, setSelectedPastMaterialId] = useState<string | null>(null);
+  const [selectedPastMaterialIds, setSelectedPastMaterialIds] = useState<string[]>([]);
+  const [isUploadingToLibrary, setIsUploadingToLibrary] = useState(false);
+  const [libraryUploadStatus, setLibraryUploadStatus] = useState<string | null>(null);
+  const [showAddNoteModal, setShowAddNoteModal] = useState(false);
+  const [newNoteTitle, setNewNoteTitle] = useState('');
+  const [newNoteSubject, setNewNoteSubject] = useState('');
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const libraryFileInputRef = React.useRef<HTMLInputElement>(null);
 
   const loadPastMaterials = useCallback(async () => {
     setIsLoadingPastMaterials(true);
@@ -218,9 +235,87 @@ export default function CreateExamPage() {
     loadPastMaterials();
   }, [loadPastMaterials]);
 
+  const toggleSelectPastMaterial = (id: string) => {
+    setSelectedPastMaterialIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllPastMaterials = () => {
+    const filtered = pastMaterials.filter((item) => {
+      if (!pastSearchQuery.trim()) return true;
+      const q = pastSearchQuery.toLowerCase();
+      return (
+        item.fileName.toLowerCase().includes(q) ||
+        (item.title && item.title.toLowerCase().includes(q)) ||
+        (item.subject && item.subject.toLowerCase().includes(q)) ||
+        item.extractedContent.toLowerCase().includes(q)
+      );
+    });
+    setSelectedPastMaterialIds(filtered.map((m) => m.id));
+  };
+
+  const handleDeselectAllPastMaterials = () => {
+    setSelectedPastMaterialIds([]);
+  };
+
+  const handleUseSelectedPastMaterials = () => {
+    if (selectedPastMaterialIds.length === 0) return;
+    const selected = pastMaterials.filter((m) => selectedPastMaterialIds.includes(m.id));
+    if (selected.length === 0) return;
+
+    const mergedContent = selected
+      .map((m) => m.extractedContent.trim())
+      .filter(Boolean)
+      .join('\n\n---\n\n');
+
+    setLessonContent(mergedContent);
+    const fileNames = selected.map((m) => m.fileName);
+    setSynthesizedDocNames(fileNames);
+
+    if (!title && selected[0]?.title) {
+      setTitle(selected[0].title);
+    }
+    if (!subject && selected[0]?.subject) {
+      setSubject(selected[0].subject);
+    }
+  };
+
+  const handleAppendSelectedPastMaterials = () => {
+    if (selectedPastMaterialIds.length === 0) return;
+    const selected = pastMaterials.filter((m) => selectedPastMaterialIds.includes(m.id));
+    if (selected.length === 0) return;
+
+    const mergedContent = selected
+      .map((m) => m.extractedContent.trim())
+      .filter(Boolean)
+      .join('\n\n---\n\n');
+
+    setLessonContent((prev) =>
+      prev.trim().length > 0 ? `${prev.trim()}\n\n---\n\n${mergedContent}` : mergedContent
+    );
+
+    const newNames = selected.map((m) => m.fileName);
+    setSynthesizedDocNames((prev) => Array.from(new Set([...prev, ...newNames])));
+  };
+
+  const handleDeleteSelectedPastMaterials = async () => {
+    if (selectedPastMaterialIds.length === 0) return;
+    const toDelete = [...selectedPastMaterialIds];
+    try {
+      const res = await deleteMultiplePastMaterialsAction(toDelete);
+      if (res.success) {
+        setPastMaterials((prev) => prev.filter((m) => !toDelete.includes(m.id)));
+        setSelectedPastMaterialIds([]);
+      }
+    } catch (err) {
+      console.error('Error deleting selected materials:', err);
+    }
+  };
+
   const handleSelectPastMaterial = (item: PastMaterialRecord) => {
     setLessonContent(item.extractedContent);
-    setSelectedPastMaterialId(item.id);
+    setSelectedPastMaterialIds([item.id]);
     setSynthesizedDocNames([item.fileName]);
     if (!title && item.title) setTitle(item.title);
     if (!subject && item.subject) setSubject(item.subject);
@@ -230,7 +325,9 @@ export default function CreateExamPage() {
     setLessonContent((prev) =>
       prev.trim().length > 0 ? `${prev.trim()}\n\n---\n\n${item.extractedContent}` : item.extractedContent
     );
-    setSelectedPastMaterialId(item.id);
+    setSelectedPastMaterialIds((prev) =>
+      prev.includes(item.id) ? prev : [...prev, item.id]
+    );
     setSynthesizedDocNames((prev) =>
       prev.includes(item.fileName) ? prev : [...prev, item.fileName]
     );
@@ -242,12 +339,66 @@ export default function CreateExamPage() {
       const res = await deletePastMaterialAction(id);
       if (res.success) {
         setPastMaterials((prev) => prev.filter((m) => m.id !== id));
-        if (selectedPastMaterialId === id) {
-          setSelectedPastMaterialId(null);
-        }
+        setSelectedPastMaterialIds((prev) => prev.filter((i) => i !== id));
       }
     } catch (err) {
       console.error('Error deleting past material:', err);
+    }
+  };
+
+  const handleAddFilesToLibrary = async (files: FileList | File[]) => {
+    if (!files || files.length === 0) return;
+    setIsUploadingToLibrary(true);
+    setLibraryUploadStatus(`Uploading & analyzing ${files.length} document${files.length > 1 ? 's' : ''}...`);
+
+    try {
+      const formData = new FormData();
+      Array.from(files).forEach((f) => formData.append('files', f));
+      const res = await uploadMultipleToPastMaterialsAction(formData);
+
+      if (res.success && res.materials) {
+        setPastMaterials((prev) => [...res.materials!, ...prev]);
+        const newIds = res.materials.map((m) => m.id);
+        setSelectedPastMaterialIds((prev) => Array.from(new Set([...prev, ...newIds])));
+        setLibraryUploadStatus(`Successfully added ${res.addedCount} document${res.addedCount! > 1 ? 's' : ''} to library!`);
+        setTimeout(() => setLibraryUploadStatus(null), 4000);
+      } else {
+        setLibraryUploadStatus(res.error || 'Failed to add files to library.');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error adding files to library.';
+      setLibraryUploadStatus(msg);
+    } finally {
+      setIsUploadingToLibrary(false);
+      if (libraryFileInputRef.current) libraryFileInputRef.current.value = '';
+    }
+  };
+
+  const handleSaveManualNote = async () => {
+    if (!newNoteContent.trim()) return;
+    setIsSavingNote(true);
+    try {
+      const res = await savePastMaterialAction({
+        fileName: `${newNoteTitle.trim() || 'Study Notes'}.txt`,
+        title: newNoteTitle.trim() || 'Study Notes',
+        subject: newNoteSubject.trim() || 'General Subject',
+        mimeType: 'text/plain',
+        extractedContent: newNoteContent.trim()
+      });
+      if (res.success && res.material) {
+        setPastMaterials((prev) => [res.material!, ...prev]);
+        setSelectedPastMaterialIds((prev) => [...prev, res.material!.id]);
+        setShowAddNoteModal(false);
+        setNewNoteTitle('');
+        setNewNoteSubject('');
+        setNewNoteContent('');
+        setLibraryUploadStatus('Custom study notes saved to library!');
+        setTimeout(() => setLibraryUploadStatus(null), 3000);
+      }
+    } catch (err) {
+      console.error('Error saving manual note:', err);
+    } finally {
+      setIsSavingNote(false);
     }
   };
 
@@ -1254,13 +1405,27 @@ export default function CreateExamPage() {
           {/* TAB 2: PAST FILES LIBRARY */}
           {sourceTab === 'past' && (
             <div className="space-y-4 animate-in fade-in duration-200">
-              {/* Search & Refresh Toolbar */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="relative flex-1 max-w-md">
+              {/* Hidden file input for adding files directly to library */}
+              <input
+                ref={libraryFileInputRef}
+                type="file"
+                multiple
+                accept=".pdf,.txt,image/*"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    handleAddFilesToLibrary(e.target.files);
+                  }
+                }}
+                className="hidden"
+              />
+
+              {/* Search & Actions Toolbar */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="relative flex-1">
                   <Search className="w-4 h-4 absolute left-3 top-2.5 text-ink-muted" />
                   <input
                     type="text"
-                    placeholder="Search past files by name, subject, or keywords..."
+                    placeholder="Search library by file name, subject, topic, or content..."
                     value={pastSearchQuery}
                     onChange={(e) => setPastSearchQuery(e.target.value)}
                     className="w-full pl-9 pr-8 py-2 rounded-[2px] bg-ground border border-rule text-ink placeholder-slate-500 text-xs focus:outline-none focus:border-ink transition"
@@ -1276,17 +1441,133 @@ export default function CreateExamPage() {
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={loadPastMaterials}
-                  disabled={isLoadingPastMaterials}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[2px] bg-paper hover:bg-slate-800 border border-rule text-ink text-xs font-medium transition self-start sm:self-auto disabled:opacity-50"
-                  title="Refresh library"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPastMaterials ? 'animate-spin' : ''}`} />
-                  <span>Refresh Library</span>
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Add Files to Library Button (Multi-file enabled) */}
+                  <button
+                    type="button"
+                    onClick={() => libraryFileInputRef.current?.click()}
+                    disabled={isUploadingToLibrary}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[2px] bg-ink hover:bg-ink/90 text-paper text-xs font-semibold transition disabled:opacity-50"
+                    title="Upload and save multiple files to your library"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    <span>Add Files to Library</span>
+                  </button>
+
+                  {/* Quick Text Note Modal Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setShowAddNoteModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[2px] bg-ground hover:bg-slate-800 border border-rule text-ink text-xs font-medium transition"
+                    title="Add custom written notes to library"
+                  >
+                    <FolderPlus className="w-3.5 h-3.5 text-ink" />
+                    <span>New Note</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={loadPastMaterials}
+                    disabled={isLoadingPastMaterials}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-[2px] bg-paper hover:bg-slate-800 border border-rule text-ink text-xs font-medium transition disabled:opacity-50"
+                    title="Refresh library"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPastMaterials ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
               </div>
+
+              {/* Upload Status Banner */}
+              {isUploadingToLibrary && (
+                <div className="flex items-center gap-2.5 p-3 rounded-[2px] bg-ground border border-ink text-xs text-ink">
+                  <Loader2 className="w-4 h-4 animate-spin text-ink shrink-0" />
+                  <span>{libraryUploadStatus || 'Extracting and saving files into your library with Gemini...'}</span>
+                </div>
+              )}
+
+              {libraryUploadStatus && !isUploadingToLibrary && (
+                <div className="flex items-center justify-between p-3 rounded-[2px] bg-ground border border-rule text-xs text-verified">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{libraryUploadStatus}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLibraryUploadStatus(null)}
+                    className="text-ink-muted hover:text-ink text-xs"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Multi-Selection Control Bar */}
+              {pastMaterials.length > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-[2px] bg-ground border border-rule text-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllPastMaterials}
+                      className="px-2.5 py-1 rounded-[2px] bg-paper hover:bg-slate-800 border border-rule text-ink font-medium transition text-[11px]"
+                    >
+                      ✓ Select All Visible
+                    </button>
+                    {selectedPastMaterialIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleDeselectAllPastMaterials}
+                        className="px-2.5 py-1 rounded-[2px] bg-paper hover:bg-slate-800 border border-rule text-ink-muted hover:text-ink transition text-[11px]"
+                      >
+                        ✗ Deselect All
+                      </button>
+                    )}
+                    <span className="text-ink font-medium">
+                      {selectedPastMaterialIds.length > 0 ? (
+                        <span className="text-verified font-semibold">
+                          ● {selectedPastMaterialIds.length} of {pastMaterials.length} Selected
+                        </span>
+                      ) : (
+                        <span className="text-ink-muted">
+                          (Click checkboxes or cards to select multiple files)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+
+                  {/* Batch Actions when 1 or more are selected */}
+                  {selectedPastMaterialIds.length > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={handleUseSelectedPastMaterials}
+                        className="px-3.5 py-1.5 rounded-[2px] bg-ink hover:bg-ink/90 text-paper font-semibold transition text-xs shadow-sm flex items-center gap-1.5"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Use Selected ({selectedPastMaterialIds.length})</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleAppendSelectedPastMaterials}
+                        className="px-3 py-1.5 rounded-[2px] bg-paper hover:bg-slate-800 border border-rule text-ink font-medium transition text-xs flex items-center gap-1"
+                        title="Append selected documents to current lesson outline"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Append ({selectedPastMaterialIds.length})</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleDeleteSelectedPastMaterials}
+                        className="p-1.5 rounded-[2px] bg-paper hover:bg-rose-950/40 border border-rule hover:border-rose-500/40 text-rose-400 hover:text-rose-300 transition text-xs"
+                        title="Delete selected documents from library"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Past Materials Grid */}
               {isLoadingPastMaterials ? (
@@ -1300,21 +1581,32 @@ export default function CreateExamPage() {
                     <FolderOpen className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-ink">No Past Files Saved Yet</h4>
+                    <h4 className="text-sm font-semibold text-ink">No Saved Files in Library Yet</h4>
                     <p className="text-xs text-ink-muted max-w-sm mx-auto mt-1">
-                      Upload PDFs or documents in the Upload tab and extract them; they will automatically be preserved here so you never have to upload them again!
+                      Add multiple PDFs, lecture notes, or syllabi directly here to preserve them for all your future exams!
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSourceTab('upload')}
-                    className="px-4 py-2 rounded-[2px] bg-ink hover:bg-ink/90 text-paper text-xs font-semibold transition"
-                  >
-                    Upload Your First File
-                  </button>
+                  <div className="flex items-center justify-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => libraryFileInputRef.current?.click()}
+                      className="px-4 py-2 rounded-[2px] bg-ink hover:bg-ink/90 text-paper text-xs font-semibold transition flex items-center gap-1.5"
+                    >
+                      <UploadCloud className="w-3.5 h-3.5" />
+                      <span>Upload Files to Library</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddNoteModal(true)}
+                      className="px-3.5 py-2 rounded-[2px] bg-ground hover:bg-slate-800 border border-rule text-ink text-xs font-medium transition flex items-center gap-1.5"
+                    >
+                      <FolderPlus className="w-3.5 h-3.5 text-ink" />
+                      <span>Write Note</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto pr-1">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto pr-1">
                   {pastMaterials
                     .filter((item) => {
                       if (!pastSearchQuery.trim()) return true;
@@ -1327,24 +1619,41 @@ export default function CreateExamPage() {
                       );
                     })
                     .map((item) => {
-                      const isSelected = selectedPastMaterialId === item.id;
+                      const isSelected = selectedPastMaterialIds.includes(item.id);
                       return (
                         <div
                           key={item.id}
-                          className={`p-3.5 rounded-[2px] border text-xs transition flex flex-col justify-between gap-3 ${
+                          onClick={() => toggleSelectPastMaterial(item.id)}
+                          className={`p-3.5 rounded-[2px] border text-xs transition flex flex-col justify-between gap-3 cursor-pointer select-none ${
                             isSelected
-                              ? 'bg-ground border-ink shadow-md '
-                              : 'bg-paper/80 border-rule hover:border-rule'
+                              ? 'bg-ground border-ink ring-1 ring-ink/30 shadow-md'
+                              : 'bg-paper/80 border-rule hover:border-slate-600'
                           }`}
                         >
                           <div className="space-y-1.5">
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex items-center gap-2 min-w-0">
+                                {/* Multi-select Checkbox */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleSelectPastMaterial(item.id);
+                                  }}
+                                  className="text-ink hover:text-ink p-0.5 rounded transition shrink-0"
+                                >
+                                  {isSelected ? (
+                                    <CheckSquare className="w-4 h-4 text-ink" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-ink-muted hover:text-slate-300" />
+                                  )}
+                                </button>
+
                                 <div className="w-7 h-7 rounded-[2px] bg-ground border border-rule flex items-center justify-center text-ink shrink-0">
                                   <FileText className="w-3.5 h-3.5" />
                                 </div>
                                 <div className="min-w-0">
-                                  <div className="font-semibold text-ink truncate max-w-[200px]" title={item.fileName}>
+                                  <div className="font-semibold text-ink truncate max-w-[170px]" title={item.fileName}>
                                     {item.fileName}
                                   </div>
                                   <div className="text-[10px] text-ink-muted">
@@ -1387,7 +1696,7 @@ export default function CreateExamPage() {
                             </p>
                           </div>
 
-                          <div className="flex items-center justify-between pt-2 border-t border-rule">
+                          <div className="flex items-center justify-between pt-2 border-t border-rule" onClick={(e) => e.stopPropagation()}>
                             <span className="text-[10px] font-mono text-ink-muted">
                               {item.extractedContent.length.toLocaleString()} chars
                             </span>
@@ -1396,7 +1705,7 @@ export default function CreateExamPage() {
                               <button
                                 type="button"
                                 onClick={() => handleAppendPastMaterial(item)}
-                                className="px-2.5 py-1 rounded-[2px] bg-ground hover:bg-slate-800 text-[11px] font-medium text-ink border border-rule transition"
+                                className="px-2 py-1 rounded-[2px] bg-ground hover:bg-slate-800 text-[11px] font-medium text-ink border border-rule transition"
                                 title="Append to existing notes"
                               >
                                 + Append
@@ -1404,16 +1713,16 @@ export default function CreateExamPage() {
                               <button
                                 type="button"
                                 onClick={() => handleSelectPastMaterial(item)}
-                                className={`px-3 py-1 rounded-[2px] text-[11px] font-semibold transition flex items-center gap-1 ${
+                                className={`px-2.5 py-1 rounded-[2px] text-[11px] font-semibold transition flex items-center gap-1 ${
                                   isSelected
-                                    ? 'bg-emerald-500 text-ink'
-                                    : 'bg-ink hover:bg-ink/90 text-paper'
+                                    ? 'bg-ink text-paper'
+                                    : 'bg-paper hover:bg-slate-800 text-ink border border-rule'
                                 }`}
                               >
                                 {isSelected ? (
                                   <>
                                     <Check className="w-3 h-3" />
-                                    <span>Active</span>
+                                    <span>Selected</span>
                                   </>
                                 ) : (
                                   <span>Use File</span>
@@ -1429,26 +1738,115 @@ export default function CreateExamPage() {
             </div>
           )}
 
+          {/* Quick Note Modal */}
+          {showAddNoteModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ground/80 backdrop-blur-sm animate-in fade-in duration-150">
+              <div className="w-full max-w-lg rounded-[2px] bg-ground border border-rule p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between pb-2 border-b border-rule">
+                  <div className="flex items-center gap-2 text-sm font-bold text-ink">
+                    <FolderPlus className="w-4 h-4 text-ink" />
+                    <span>Save Custom Note to Library</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddNoteModal(false)}
+                    className="text-ink-muted hover:text-ink transition"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-ink-muted font-medium mb-1">Title</label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Chapter 4: Genetics and Heredity"
+                      value={newNoteTitle}
+                      onChange={(e) => setNewNoteTitle(e.target.value)}
+                      className="w-full px-3 py-2 rounded-[2px] bg-paper border border-rule text-ink placeholder-slate-500 focus:outline-none focus:border-ink transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-ink-muted font-medium mb-1">Subject</label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Biology 101"
+                      value={newNoteSubject}
+                      onChange={(e) => setNewNoteSubject(e.target.value)}
+                      className="w-full px-3 py-2 rounded-[2px] bg-paper border border-rule text-ink placeholder-slate-500 focus:outline-none focus:border-ink transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-ink-muted font-medium mb-1">Study Notes / Syllabus Outline *</label>
+                    <textarea
+                      rows={5}
+                      placeholder="Paste or write lesson concepts, formulas, definitions, or syllabus contents here..."
+                      value={newNoteContent}
+                      onChange={(e) => setNewNoteContent(e.target.value)}
+                      className="w-full px-3 py-2 rounded-[2px] bg-paper border border-rule text-ink placeholder-slate-500 focus:outline-none focus:border-ink transition leading-relaxed font-sans"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-rule">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddNoteModal(false)}
+                    className="px-3.5 py-1.5 rounded-[2px] bg-ground hover:bg-slate-800 text-ink-muted text-xs font-medium transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSavingNote || !newNoteContent.trim()}
+                    onClick={handleSaveManualNote}
+                    className="px-4 py-1.5 rounded-[2px] bg-ink hover:bg-ink/90 text-paper text-xs font-semibold transition disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {isSavingNote && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    <span>Save to Library</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Active Source Banner */}
-          {selectedPastMaterialId && (
-            <div className="flex items-center justify-between p-3 rounded-[2px] bg-ground border border-rule text-xs">
-              <div className="flex items-center gap-2 text-ink-muted">
+          {selectedPastMaterialIds.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-[2px] bg-ground border border-rule text-xs">
+              <div className="flex items-center gap-2 text-ink">
                 <FileText className="w-4 h-4 text-ink shrink-0" />
                 <span>
-                  Using lesson content from saved library file: <strong>{synthesizedDocNames[0] || 'Saved Document'}</strong>
+                  Using lesson content from <strong>{selectedPastMaterialIds.length}</strong> saved library document{selectedPastMaterialIds.length > 1 ? 's' : ''}
+                  {synthesizedDocNames.length > 0 && (
+                    <span className="text-ink-muted text-[11px] ml-1">
+                      ({synthesizedDocNames.join(', ')})
+                    </span>
+                  )}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedPastMaterialId(null);
-                  setSynthesizedDocNames([]);
-                  setLessonContent('');
-                }}
-                className="text-xs text-ink-muted hover:text-rose-400 transition underline"
-              >
-                Clear Content
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleUseSelectedPastMaterials}
+                  className="px-2.5 py-1 rounded-[2px] bg-ink hover:bg-ink/90 text-paper text-[11px] font-semibold transition"
+                >
+                  Apply All Selected ({selectedPastMaterialIds.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPastMaterialIds([]);
+                    setSynthesizedDocNames([]);
+                    setLessonContent('');
+                  }}
+                  className="text-xs text-ink-muted hover:text-rose-400 transition underline"
+                >
+                  Clear Selection & Content
+                </button>
+              </div>
             </div>
           )}
 

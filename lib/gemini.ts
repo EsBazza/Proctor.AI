@@ -31,6 +31,102 @@ export interface DocumentInput {
 }
 
 /**
+ * Robust JSON sanitizer for raw LLM responses.
+ * Escapes unescaped control characters (newlines, tabs, CR, ASCII < 32)
+ * inside string literals, strips markdown fences, removes trailing commas,
+ * and extracts bounding JSON objects or arrays.
+ */
+export function sanitizeJsonString(raw: string): string {
+  if (!raw) return '';
+  let str = raw.trim();
+
+  // 1. Strip markdown fences if present (e.g. ```json ... ```)
+  if (str.startsWith('```')) {
+    str = str.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  }
+
+  // 2. Locate bounding brackets ({...} or [...])
+  const firstBrace = str.indexOf('{');
+  const firstBracket = str.indexOf('[');
+  let startIdx = -1;
+  if (firstBrace !== -1 && firstBracket !== -1) {
+    startIdx = Math.min(firstBrace, firstBracket);
+  } else if (firstBrace !== -1) {
+    startIdx = firstBrace;
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+  }
+
+  const lastBrace = str.lastIndexOf('}');
+  const lastBracket = str.lastIndexOf(']');
+  const endIdx = Math.max(lastBrace, lastBracket);
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    str = str.substring(startIdx, endIdx + 1);
+  }
+
+  // 3. State machine escaping control characters inside string literals
+  let inString = false;
+  let isEscaped = false;
+  let result = '';
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    const code = str.charCodeAt(i);
+
+    if (inString) {
+      if (isEscaped) {
+        result += char;
+        isEscaped = false;
+      } else if (char === '\\') {
+        result += char;
+        isEscaped = true;
+      } else if (char === '"') {
+        inString = false;
+        result += char;
+      } else if (code < 32) {
+        // Unescaped control character inside string literal - escape it!
+        if (char === '\n') result += '\\n';
+        else if (char === '\r') result += '\\r';
+        else if (char === '\t') result += '\\t';
+        else result += '\\u' + ('0000' + code.toString(16)).slice(-4);
+      } else {
+        result += char;
+      }
+    } else {
+      if (char === '"') inString = true;
+      result += char;
+    }
+  }
+
+  // 4. Strip trailing commas before closing braces/brackets (e.g. [1, 2,] or {"a": 1,})
+  result = result.replace(/,\s*([\]}])/g, '$1');
+
+  return result;
+}
+
+/**
+ * Safely parses JSON strings produced by LLMs or database records,
+ * with automatic fallback sanitization to eliminate control-character errors.
+ */
+export function safeJsonParse<T = any>(raw: string, fallback?: T): T {
+  if (!raw || typeof raw !== 'string') {
+    return fallback !== undefined ? (fallback as T) : (null as any);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    try {
+      const sanitized = sanitizeJsonString(raw);
+      return JSON.parse(sanitized);
+    } catch (err) {
+      if (fallback !== undefined) return fallback;
+      throw err;
+    }
+  }
+}
+
+/**
  * Extracts and synthesizes core lesson material from multiple uploaded PDFs or images
  * using Gemini 3.5 Flash Lite with automatic 503 high-demand fallback and token counting.
  */
@@ -136,7 +232,7 @@ OUTPUT: Return ONLY a valid JSON object, with no markdown fences and no commenta
       ]);
 
       const text = result.response.text().trim();
-      const parsed = JSON.parse(text);
+      const parsed = safeJsonParse(text);
       console.log(`[Document Parsing] Extraction successfully completed with ${modelName}.`);
       return {
         title: parsed.title || undefined,
@@ -335,7 +431,7 @@ OUTPUT: Return ONLY a valid JSON array of slot objects:
     });
 
     const result = await model.generateContent(blueprintPrompt);
-    const parsed = JSON.parse(result.response.text().trim());
+    const parsed = safeJsonParse(result.response.text().trim(), []);
     if (Array.isArray(parsed) && parsed.length > 0) {
       const validBloom = ['REMEMBER', 'UNDERSTAND', 'APPLY', 'ANALYZE', 'EVALUATE'] as const;
       type BloomType = (typeof validBloom)[number];
@@ -499,7 +595,7 @@ OUTPUT: ONLY a valid JSON object, with no fences and no commentary:
 
       const result = await model.generateContent(variantPrompt);
       const text = result.response.text().trim();
-      const parsed = JSON.parse(text);
+      const parsed = safeJsonParse(text);
 
       const questionsList = (Array.isArray(parsed.questions) ? parsed.questions : []) as Array<Record<string, unknown>>;
       return {
@@ -513,13 +609,9 @@ OUTPUT: ONLY a valid JSON object, with no fences and no commentary:
           } else if (q.options && typeof q.options === 'object') {
             parsedOptions = q.options as MatchingColumns;
           } else if (typeof q.options === 'string') {
-            try {
-              const parsed = JSON.parse(q.options);
-              if (Array.isArray(parsed) || (parsed && typeof parsed === 'object')) {
-                parsedOptions = parsed;
-              }
-            } catch {
-              parsedOptions = null;
+            const parsed = safeJsonParse(q.options, null);
+            if (Array.isArray(parsed) || (parsed && typeof parsed === 'object')) {
+              parsedOptions = parsed;
             }
           }
 
@@ -684,7 +776,7 @@ export async function gradeStudentAnswer(
       const parsePairs = (str: string): Record<string, string> => {
         const pairs: Record<string, string> = {};
         if (str.startsWith('{')) {
-          const parsed = JSON.parse(str);
+          const parsed = safeJsonParse(str, {});
           return Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k.trim(), String(v).trim().toUpperCase()]));
         }
         str.split(/[,;\n]+/).forEach((segment) => {
@@ -782,7 +874,7 @@ Return JSON:
   try {
     const result = await model.generateContent(evalPrompt);
     const text = result.response.text().trim();
-    return JSON.parse(text);
+    return safeJsonParse(text);
   } catch (err) {
     console.error('[Gemini AI Grading Error]', err);
     return {
@@ -881,7 +973,7 @@ Return a JSON object matching this schema:
       ]);
 
       const text = result.response.text().trim();
-      const parsed = JSON.parse(text);
+      const parsed = safeJsonParse(text);
 
       return {
         threatRank: parsed.threatRank || 'SUSPICIOUS',
@@ -972,7 +1064,7 @@ Synthesize a comprehensive teacher briefing. Return a JSON object:
 `;
       const res = await model.generateContent(prompt);
       const text = res.response.text().trim();
-      return JSON.parse(text);
+      return safeJsonParse(text);
     } catch (e) {
       console.error('Error generating cohort analytics:', e);
     }

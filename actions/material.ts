@@ -2,6 +2,7 @@
 
 import { auth } from '@/lib/auth';
 import { dbService, PastMaterialRecord } from '@/lib/db';
+import { extractLessonFromDocument, DocumentInput } from '@/lib/gemini';
 
 export async function getPastMaterialsAction(): Promise<{
   success: boolean;
@@ -100,3 +101,102 @@ export async function deletePastMaterialAction(id: string): Promise<{
     return { success: false, error: message };
   }
 }
+
+export async function deleteMultiplePastMaterialsAction(ids: string[]): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  try {
+    for (const id of ids) {
+      if (!id.startsWith('derived_')) {
+        await dbService.deletePastMaterial(id);
+      }
+    }
+    return { success: true };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Error deleting materials';
+    return { success: false, error: message };
+  }
+}
+
+export async function uploadMultipleToPastMaterialsAction(formData: FormData): Promise<{
+  success: boolean;
+  addedCount?: number;
+  materials?: PastMaterialRecord[];
+  error?: string;
+}> {
+  try {
+    const session = await auth();
+    const teacherEmail = session?.user?.email || null;
+
+    const files = formData.getAll('files') as File[];
+    if (!files || files.length === 0) {
+      return { success: false, error: 'No files were uploaded.' };
+    }
+
+    const validMimes = ['application/pdf', 'text/plain', 'image/png', 'image/jpeg', 'image/webp'];
+    const addedMaterials: PastMaterialRecord[] = [];
+
+    for (const file of files) {
+      const mimeType = file.type || 'application/pdf';
+      const isTxt = mimeType === 'text/plain' || file.name.toLowerCase().endsWith('.txt');
+      const isPdf = mimeType === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const isImg = mimeType.startsWith('image/');
+
+      if (!isTxt && !isPdf && !isImg) {
+        continue;
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      if (buffer.length > 20 * 1024 * 1024) {
+        continue;
+      }
+
+      if (isTxt) {
+        const textContent = buffer.toString('utf-8');
+        if (textContent.trim()) {
+          const title = file.name.replace(/\.[^/.]+$/, '');
+          const material = await dbService.createPastMaterial({
+            teacherEmail,
+            fileName: file.name,
+            fileSize: buffer.length,
+            mimeType: 'text/plain',
+            title,
+            subject: 'Study Material',
+            extractedContent: textContent.trim()
+          });
+          addedMaterials.push(material);
+        }
+      } else {
+        const docInput: DocumentInput = {
+          base64Data: buffer.toString('base64'),
+          mimeType,
+          fileName: file.name
+        };
+        const extracted = await extractLessonFromDocument(docInput.base64Data, docInput.mimeType, docInput.fileName);
+        const material = await dbService.createPastMaterial({
+          teacherEmail,
+          fileName: file.name,
+          fileSize: buffer.length,
+          mimeType,
+          title: extracted.title || file.name.replace(/\.[^/.]+$/, ''),
+          subject: extracted.subject || 'Study Material',
+          extractedContent: extracted.extractedContent || `Lesson content extracted from ${file.name}`
+        });
+        addedMaterials.push(material);
+      }
+    }
+
+    if (addedMaterials.length === 0) {
+      return { success: false, error: 'No valid files could be processed.' };
+    }
+
+    return { success: true, addedCount: addedMaterials.length, materials: addedMaterials };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Error uploading materials to library';
+    return { success: false, error: message };
+  }
+}
+
