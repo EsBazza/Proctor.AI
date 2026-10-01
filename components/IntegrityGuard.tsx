@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Shield, AlertTriangle, Monitor, X } from 'lucide-react';
 import { logIntegrityEventWithSequenceAction, sendStudentHeartbeatAction } from '@/actions/student';
+import { getSupabaseClient } from '@/lib/supabase';
 
 interface ViolationNotice {
   eventType: 'TAB_SWITCH' | 'WINDOW_BLUR' | 'PASTE_ATTEMPT' | 'FULLSCREEN_EXIT';
@@ -53,6 +54,12 @@ export function IntegrityGuard({
   const [isStreamPaused, setIsStreamPaused] = useState(false);
   const [activeViolationModal, setActiveViolationModal] = useState<ViolationNotice | null>(null);
   const [violationHistory, setViolationHistory] = useState<ViolationNotice[]>([]);
+  const [isBeingWatched, setIsBeingWatched] = useState(false);
+  const [teacherNudgeMessage, setTeacherNudgeMessage] = useState<string | null>(null);
+
+  const realtimeChannelRef = useRef<any>(null);
+  const frameSeqRef = useRef<number>(0);
+  const isBeingWatchedRef = useRef(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -174,58 +181,93 @@ export function IntegrityGuard({
     }
   }, []);
 
-  // Veyon-Style Reactive Adaptive Screen Pulse:
-  // - When idle: checks watch flag every 2.5s and sends overview thumbnail every 10s.
-  // - When teacher inspects: wakes up within <=2s and streams 1280px HD frames every 1 second!
-  const isBeingWatchedRef = useRef(false);
-  const lastFullFrameSentRef = useRef<number>(0);
-
+  // Supabase Realtime Channel: Instant bidirectional transport for watch mode and teacher nudges
   useEffect(() => {
     if (!isScreenSharing || isLocked) return;
 
-    let timeoutId: NodeJS.Timeout;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    const channelName = `student_stream_${token}`;
+    const channel = supabase.channel(channelName);
+    realtimeChannelRef.current = channel;
+
+    channel
+      .on('broadcast', { event: 'watch_mode' }, ({ payload }: { payload: { active: boolean } }) => {
+        const active = !!payload?.active;
+        isBeingWatchedRef.current = active;
+        setIsBeingWatched(active);
+      })
+      .on('broadcast', { event: 'teacher_nudge' }, ({ payload }: { payload: { message: string } }) => {
+        if (payload?.message) {
+          playAlertChime();
+          setTeacherNudgeMessage(payload.message);
+          setTimeout(() => setTeacherNudgeMessage(null), 9000);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      realtimeChannelRef.current = null;
+    };
+  }, [isScreenSharing, isLocked, token, playAlertChime]);
+
+  // Ephemeral Realtime Frame Stream + 30s DB Presence Fallback
+  useEffect(() => {
+    if (!isScreenSharing || isLocked) return;
+
+    let streamTimeoutId: NodeJS.Timeout;
     let isCancelled = false;
 
-    const pulse = async () => {
+    // 1. Ephemeral Frame Pushing:
+    // When teacher is watching: stream 1280px HD frame every 1.0s over socket.
+    // When idle: stream 800px overview frame every 12s over socket.
+    // Frames are broadcast ephemerally in-memory and NOT saved into PostgreSQL.
+    const streamLoop = async () => {
       try {
-        const now = Date.now();
         const isWatched = isBeingWatchedRef.current;
-        // In live watch mode: send 1280px HD frame every ~1s
-        // In idle classroom mode: send 800px frame every 10s
-        const shouldSendFrame = isWatched || (now - lastFullFrameSentRef.current >= 10000);
+        const channel = realtimeChannelRef.current;
+        const frame = captureThumbnail(isWatched);
 
-        const frame = shouldSendFrame ? captureThumbnail(isWatched) : undefined;
-        if (frame) {
-          lastFullFrameSentRef.current = now;
-        }
-
-        const res = await sendStudentHeartbeatAction({
-          token,
-          latestScreenFrame: frame,
-          currentQuestion: currentQuestionIndex
-        });
-
-        if (res && res.success) {
-          isBeingWatchedRef.current = !!res.isBeingWatched;
+        if (frame && channel) {
+          frameSeqRef.current += 1;
+          channel.send({
+            type: 'broadcast',
+            event: 'screen_frame',
+            payload: {
+              frame,
+              seq: frameSeqRef.current,
+              currentQuestion: currentQuestionIndex,
+              timestamp: Date.now()
+            }
+          });
         }
       } catch {
-        // Non-blocking background heartbeat
+        // Non-blocking socket transport
       }
 
       if (!isCancelled) {
-        // Fast 1000ms pulse when teacher is watching;
-        // 2500ms quick check when idle (instant wake-up when teacher clicks)
-        const nextInterval = isBeingWatchedRef.current ? 1000 : 2500;
-        timeoutId = setTimeout(pulse, nextInterval);
+        const delay = isBeingWatchedRef.current ? 1000 : 12000;
+        streamTimeoutId = setTimeout(streamLoop, delay);
       }
     };
 
-    // First pulse immediately after screen share starts
-    timeoutId = setTimeout(pulse, 800);
+    streamTimeoutId = setTimeout(streamLoop, 1000);
+
+    // 2. Slow 30-second DB Heartbeat Fallback:
+    // Updates presence in Postgres without writing heavy base64 frames to DB.
+    const heartbeatInterval = setInterval(() => {
+      sendStudentHeartbeatAction({
+        token,
+        currentQuestion: currentQuestionIndex
+      }).catch(() => {});
+    }, 30000);
 
     return () => {
       isCancelled = true;
-      clearTimeout(timeoutId);
+      clearTimeout(streamTimeoutId);
+      clearInterval(heartbeatInterval);
     };
   }, [isScreenSharing, isLocked, token, currentQuestionIndex, captureThumbnail]);
 
@@ -596,6 +638,29 @@ export function IntegrityGuard({
               <span>Authorize Display &amp; Begin Examination</span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Privacy Notice: Transparent indicator when teacher is viewing screen */}
+      {isBeingWatched && !isConsentGateActive && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 px-3.5 py-1.5 rounded-[2px] bg-ink text-paper text-xs font-mono shadow-md border border-rule flex items-center gap-2 animate-in fade-in duration-200">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Your teacher is viewing your screen</span>
+        </div>
+      )}
+
+      {/* Teacher Nudge Intercom Notice */}
+      {teacherNudgeMessage && !isConsentGateActive && (
+        <div className="fixed top-12 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-[2px] bg-paper text-ink border border-rule shadow-lg text-xs font-mono flex items-center gap-2.5 animate-in slide-in-from-top-2 duration-200">
+          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+          <span>Notice: {teacherNudgeMessage}</span>
+          <button 
+            type="button"
+            onClick={() => setTeacherNudgeMessage(null)}
+            className="ml-2 text-ink-muted hover:text-ink transition"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 

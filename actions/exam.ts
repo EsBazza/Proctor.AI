@@ -118,6 +118,9 @@ export async function createExamAction(input: CreateExamInput) {
       id: string;
     }> = [];
 
+    const studentExamRecords: StudentExamRecord[] = [];
+    const allQuestionRecords: QuestionVariantRecord[] = [];
+
     for (const pkg of examPackages) {
       const studentExamId = 'se_' + Math.random().toString(36).substring(2, 9);
       const accessToken = 'tok_' + Math.random().toString(36).substring(2, 11);
@@ -133,7 +136,7 @@ export async function createExamAction(input: CreateExamInput) {
 
       const studentMaxPossibleScore = pkg.questions.reduce((sum, q) => sum + (q.maxPoints || 10), 0);
 
-      const studentExamRecord: StudentExamRecord = {
+      studentExamRecords.push({
         id: studentExamId,
         examId,
         studentName: pkg.studentName,
@@ -147,9 +150,7 @@ export async function createExamAction(input: CreateExamInput) {
         maxPossibleScore: studentMaxPossibleScore > 0 ? studentMaxPossibleScore : (input.questionCount * 10),
         startedAt: null,
         submittedAt: null
-      };
-
-      await dbService.createStudentExam(studentExamRecord);
+      });
 
       const questionRecords: QuestionVariantRecord[] = pkg.questions.map((q, idx) => ({
         id: 'qv_' + Math.random().toString(36).substring(2, 9),
@@ -159,7 +160,7 @@ export async function createExamAction(input: CreateExamInput) {
         conceptTested: q.conceptTested || 'Core Concept',
         difficulty: String(q.difficulty || 'MEDIUM'),
         prompt: q.prompt,
-        options: q.options ? JSON.stringify(q.options) : null,
+        options: q.options ? (typeof q.options === 'string' ? q.options : JSON.stringify(q.options)) : null,
         correctAnswer: q.correctAnswer,
         studentAnswer: null,
         isCorrect: null,
@@ -168,7 +169,7 @@ export async function createExamAction(input: CreateExamInput) {
         aiExplanation: null
       }));
 
-      await dbService.createQuestionVariants(questionRecords);
+      allQuestionRecords.push(...questionRecords);
 
       createdStudents.push({
         name: pkg.studentName,
@@ -179,6 +180,12 @@ export async function createExamAction(input: CreateExamInput) {
         id: studentExamId
       });
     }
+
+    // Execute bulk DB writes concurrently (2 fast queries instead of 40-60 sequential queries)
+    await Promise.all([
+      dbService.createStudentExamsBulk(studentExamRecords),
+      dbService.createQuestionVariants(allQuestionRecords)
+    ]);
 
     // Auto-publish private individual CourseWork assignments to Google Classroom
     let googleCourseWorkId: string | null = null;

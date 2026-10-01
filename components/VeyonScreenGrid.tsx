@@ -29,11 +29,13 @@ import {
   getSingleStudentLiveScreenAction 
 } from '@/actions/exam';
 import { UnlockStudentButton } from '@/components/UnlockStudentButton';
+import { getSupabaseClient } from '@/lib/supabase';
 
 export interface StudentScreenItem {
   id: string;
   studentName: string;
   studentEmail: string | null;
+  accessToken?: string | null;
   status: string;
   latestScreenFrame: string | null;
   lastActiveAt: string | null;
@@ -66,6 +68,17 @@ export function VeyonScreenGrid({
   const [focusedFrameKey, setFocusedFrameKey] = useState(0);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
 
+  // Realtime Socket & Canvas Telemetry State
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const inspectChannelRef = useRef<any>(null);
+  const lastFrameSeqRef = useRef<number>(0);
+  const lastFrameTimeRef = useRef<number>(0);
+  const [frameAge, setFrameAge] = useState<number>(0);
+  const [resolutionText, setResolutionText] = useState<string>('1280x720');
+  const [streamState, setStreamState] = useState<'LIVE' | 'DELAYED' | 'STALE' | 'OFFLINE'>('LIVE');
+  const [isNudgeOpen, setIsNudgeOpen] = useState(false);
+  const [nudgeToast, setNudgeToast] = useState<string | null>(null);
+
   // Background 15-second grid sweep
   const fetchAllScreens = useCallback(async () => {
     setIsRefreshing(true);
@@ -97,39 +110,134 @@ export function VeyonScreenGrid({
     return () => clearInterval(countdown);
   }, [fetchAllScreens]);
 
+  // Paint Base64 frame onto canvas atomically using createImageBitmap
+  const paintFrameToCanvas = useCallback(async (frameDataUrl: string) => {
+    try {
+      const res = await fetch(frameDataUrl);
+      const blob = await res.blob();
+      const bitmap = await createImageBitmap(blob);
+      if (canvasRef.current) {
+        const canvas = canvasRef.current;
+        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+        }
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(bitmap, 0, 0);
+        }
+      }
+      lastFrameTimeRef.current = Date.now();
+      setResolutionText(`${bitmap.width}x${bitmap.height}`);
+      setStreamState('LIVE');
+    } catch {
+      // Non-blocking canvas paint fallback
+    }
+  }, []);
+
   // Handle opening live inspection modal for a specific student
   const handleOpenInspect = async (student: StudentScreenItem) => {
     setInspectedStudentId(student.id);
     setFocusedStudent(student);
     setZoomLevel(1);
-    // Tell student client to immediately accelerate frame stream to 1s HD
+    lastFrameSeqRef.current = 0;
+    lastFrameTimeRef.current = Date.now();
+    setFrameAge(0);
+    setStreamState('LIVE');
+
+    // 1. Tell student client to accelerate frame stream via DB fallback
     setStudentWatchModeAction(student.id, true);
 
-    // Immediate initial sync
-    try {
-      const res = await getSingleStudentLiveScreenAction(student.id);
-      if (res.success && res.student) {
-        setFocusedStudent(res.student as StudentScreenItem);
-        setFocusedFrameKey((k) => k + 1);
-      }
-    } catch {
-      // Non-blocking
+    // 2. Connect to private Supabase Realtime channel for instant sub-200ms socket streaming
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const channelToken = student.accessToken || student.id;
+      const channel = supabase.channel(`student_stream_${channelToken}`);
+      inspectChannelRef.current = channel;
+
+      channel
+        .on('broadcast', { event: 'screen_frame' }, async ({ payload }: { payload: any }) => {
+          if (!payload?.frame) return;
+          if (payload.seq && payload.seq <= lastFrameSeqRef.current) return;
+          lastFrameSeqRef.current = payload.seq;
+          await paintFrameToCanvas(payload.frame);
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            channel.send({
+              type: 'broadcast',
+              event: 'watch_mode',
+              payload: { active: true }
+            });
+          }
+        });
+    }
+
+    // 3. Immediate initial paint if thumbnail exists
+    if (student.latestScreenFrame) {
+      paintFrameToCanvas(student.latestScreenFrame);
     }
   };
 
   // Handle closing live inspection modal
   const handleCloseInspect = async () => {
-    if (inspectedStudentId) {
-      // Release student back to background heartbeat to conserve bandwidth
-      await setStudentWatchModeAction(inspectedStudentId, false);
+    const studentIdToClose = inspectedStudentId;
+    if (inspectChannelRef.current) {
+      inspectChannelRef.current.send({
+        type: 'broadcast',
+        event: 'watch_mode',
+        payload: { active: false }
+      });
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        supabase.removeChannel(inspectChannelRef.current);
+      }
+      inspectChannelRef.current = null;
+    }
+
+    if (studentIdToClose) {
+      await setStudentWatchModeAction(studentIdToClose, false);
     }
     setInspectedStudentId(null);
     setFocusedStudent(null);
     setIsFullscreenModal(false);
     setZoomLevel(1);
+    setIsNudgeOpen(false);
   };
 
-  // Continuous 1-second live stream polling while inspecting a specific student
+  // Send calm canned nudge message directly to student over realtime channel
+  const handleSendNudge = (message: string) => {
+    if (inspectChannelRef.current) {
+      inspectChannelRef.current.send({
+        type: 'broadcast',
+        event: 'teacher_nudge',
+        payload: { message }
+      });
+    }
+    setIsNudgeOpen(false);
+    setNudgeToast('Notice transmitted to candidate');
+    setTimeout(() => setNudgeToast(null), 4000);
+  };
+
+  // Frame age calculator ticker (runs every 500ms while inspecting)
+  useEffect(() => {
+    if (!inspectedStudentId) return;
+
+    const interval = setInterval(() => {
+      const last = lastFrameTimeRef.current;
+      if (last > 0) {
+        const age = (Date.now() - last) / 1000;
+        setFrameAge(age);
+        if (age > 10) setStreamState('STALE');
+        else if (age > 3.5) setStreamState('DELAYED');
+        else setStreamState('LIVE');
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [inspectedStudentId]);
+
+  // Fallback 2-second DB polling if socket is inactive
   useEffect(() => {
     if (!inspectedStudentId) return;
 
@@ -145,18 +253,21 @@ export function VeyonScreenGrid({
               ...res.student
             };
           });
-          setFocusedFrameKey((k) => k + 1);
+          // If socket hasn't delivered a frame in >3.5s, paint fallback DB frame
+          if (res.student.latestScreenFrame && (Date.now() - lastFrameTimeRef.current > 3500)) {
+            paintFrameToCanvas(res.student.latestScreenFrame);
+          }
         }
       } catch (err) {
-        console.warn('Error streaming student frame:', err);
+        console.warn('Fallback stream poll notice:', err);
       }
-    }, 1000);
+    }, 2000);
 
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [inspectedStudentId]);
+  }, [inspectedStudentId, paintFrameToCanvas]);
 
   // Close on Escape key
   useEffect(() => {
@@ -435,6 +546,48 @@ export function VeyonScreenGrid({
                   )}
                 </div>
 
+                {/* Teacher Intercom Nudge Action */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsNudgeOpen((prev) => !prev)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[2px] bg-paper hover:bg-ground border border-rule text-ink text-xs font-mono transition"
+                    title="Send calm prompt to candidate screen"
+                  >
+                    <Radio className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Nudge</span>
+                  </button>
+
+                  {isNudgeOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-72 bg-paper border border-rule shadow-xl rounded-[2px] p-2 z-50 text-xs font-mono space-y-1 animate-in fade-in duration-100">
+                      <div className="text-[10px] uppercase text-ink-muted px-2 py-1 font-semibold">
+                        Transmit Prompt to Candidate
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleSendNudge('Please return to your exam tab and maintain full screen.')}
+                        className="w-full text-left px-2 py-1.5 rounded-[1px] hover:bg-ground text-ink text-[11px] transition"
+                      >
+                        • Return to exam tab &amp; full screen
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSendNudge('Ensure your face is clearly visible to your camera.')}
+                        className="w-full text-left px-2 py-1.5 rounded-[1px] hover:bg-ground text-ink text-[11px] transition"
+                      >
+                        • Ensure camera view is centered
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSendNudge('Quiet workspace required: avoid secondary audio or whispering.')}
+                        className="w-full text-left px-2 py-1.5 rounded-[1px] hover:bg-ground text-ink text-[11px] transition"
+                      >
+                        • Maintain quiet room integrity
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {focusedStudent.status === 'LOCKED' && (
                   <UnlockStudentButton
                     studentExamId={focusedStudent.id}
@@ -471,36 +624,44 @@ export function VeyonScreenGrid({
               </div>
             </div>
 
-            {/* Modal Screen Display Viewport (Theater Screen) */}
+            {/* Modal Screen Display Viewport (Atomic Canvas Painting) */}
             <div className="flex-1 bg-black/95 p-2 sm:p-4 flex items-center justify-center overflow-auto min-h-[350px] relative select-none">
-              {focusedStudent.latestScreenFrame ? (
-                <div 
-                  className="w-full h-full flex items-center justify-center overflow-auto"
-                  style={{ cursor: zoomLevel > 1 ? 'grab' : 'default' }}
-                >
-                  <img
-                    key={focusedFrameKey}
-                    src={focusedStudent.latestScreenFrame}
-                    alt={`${focusedStudent.studentName}'s Live Screen`}
-                    className="w-auto h-auto max-w-full max-h-[82vh] object-contain rounded shadow-2xl transition-transform duration-150"
-                    style={{
-                      transform: `scale(${zoomLevel})`,
-                      transformOrigin: 'center center'
-                    }}
+              <div 
+                className="w-full h-full flex items-center justify-center overflow-auto"
+                style={{ cursor: zoomLevel > 1 ? 'grab' : 'default' }}
+              >
+                <canvas
+                  ref={canvasRef}
+                  className="w-auto h-auto max-w-full max-h-[82vh] object-contain rounded shadow-2xl transition-transform duration-150"
+                  style={{
+                    transform: `scale(${zoomLevel})`,
+                    transformOrigin: 'center center'
+                  }}
+                />
+              </div>
+
+              {/* Honest Monospace Telemetry HUD (Quiet Instrument style) */}
+              <div className="absolute top-3 right-3 px-3 py-1 rounded-[2px] bg-paper/95 backdrop-blur-sm border border-rule text-ink text-[11px] font-mono flex items-center gap-2.5 shadow-md">
+                <span className="flex items-center gap-1.5">
+                  <span 
+                    className={`w-2 h-2 rounded-full ${
+                      streamState === 'LIVE' ? 'bg-emerald-500' : streamState === 'DELAYED' ? 'bg-amber-500' : 'bg-rose-500'
+                    }`} 
                   />
-                  {/* Subtle live pulse badge */}
-                  <div className="absolute top-3 right-3 px-2.5 py-1 rounded bg-ground/85 backdrop-blur-sm border border-rule text-paper text-[10px] font-mono flex items-center gap-1.5 shadow-lg">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>Live HD Stream</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-20 gap-3 text-ink-muted">
-                  <Monitor className="w-12 h-12 text-slate-700 animate-pulse" />
-                  <div className="text-sm text-ink font-medium">Waiting for candidate's screen transmission...</div>
-                  <div className="text-xs text-ink-muted font-mono">
-                    Ensure student has accepted screen sharing on their browser.
-                  </div>
+                  <span className="font-semibold text-ink uppercase tracking-wider">{streamState}</span>
+                </span>
+                <span className="text-rule">|</span>
+                <span>{resolutionText}</span>
+                <span className="text-rule">|</span>
+                <span>1.0 fps</span>
+                <span className="text-rule">|</span>
+                <span>frame age {frameAge.toFixed(1)}s</span>
+              </div>
+
+              {/* Nudge Confirmation Toast */}
+              {nudgeToast && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-[2px] bg-ink text-paper text-xs font-mono shadow-lg border border-rule animate-in fade-in duration-150">
+                  {nudgeToast}
                 </div>
               )}
             </div>

@@ -205,6 +205,27 @@ export const dbService = {
     });
   },
 
+  createStudentExamsBulk: async (studentExams: StudentExamRecord[]) => {
+    if (studentExams.length === 0) return { count: 0 };
+    return await prisma.studentExam.createMany({
+      data: studentExams.map((s) => ({
+        id: s.id,
+        examId: s.examId,
+        studentName: s.studentName,
+        studentEmail: s.studentEmail ?? null,
+        accessCode: s.accessCode ?? null,
+        accessToken: s.accessToken,
+        googleCourseWorkId: s.googleCourseWorkId ?? null,
+        googleCourseWorkUrl: s.googleCourseWorkUrl ?? null,
+        status: s.status || 'PENDING',
+        totalScore: s.totalScore ?? null,
+        maxPossibleScore: s.maxPossibleScore,
+        startedAt: s.startedAt ? new Date(s.startedAt) : null,
+        submittedAt: s.submittedAt ? new Date(s.submittedAt) : null
+      }))
+    });
+  },
+
   getStudentExamsByExamId: async (examId: string): Promise<StudentExamRecord[]> => {
     const rows = await prisma.studentExam.findMany({
       where: { examId },
@@ -818,6 +839,7 @@ export const dbService = {
         id: true,
         studentName: true,
         studentEmail: true,
+        accessToken: true,
         status: true,
         latestScreenFrame: true,
         lastActiveAt: true,
@@ -841,6 +863,7 @@ export const dbService = {
         id: true,
         studentName: true,
         studentEmail: true,
+        accessToken: true,
         status: true,
         latestScreenFrame: true,
         lastActiveAt: true,

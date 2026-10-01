@@ -699,12 +699,12 @@ export async function generateIsomorphicExams(
 
   console.log(`[Exam Architect] Master blueprint created with ${blueprint.length} slot(s). Generating ${roster.length} personalized student variant(s)...`);
 
-  // 2. Generate personalized isomorphic variant per student using variantPrompt in concurrent batches
-  const batchSize = 4;
+  // 2. Generate personalized isomorphic variant per student using variantPrompt with high concurrency (8 parallel workers)
+  const concurrency = 8;
   const packages: StudentExamPackage[] = [];
 
-  for (let i = 0; i < roster.length; i += batchSize) {
-    const chunk = roster.slice(i, i + batchSize);
+  for (let i = 0; i < roster.length; i += concurrency) {
+    const chunk = roster.slice(i, i + concurrency);
     const chunkPromises = chunk.map((name, idx) => {
       const globalIdx = i + idx;
       // Deterministic variation seed per student
