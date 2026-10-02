@@ -1,25 +1,34 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: oklch(0.22 0.025 255);
-  --color-ink-muted: oklch(0.48 0.02 255);
-  --color-paper: oklch(0.995 0.002 255);
-  --color-ground: oklch(0.965 0.006 255);
-  --color-rule: oklch(0.88 0.008 255);
-  --color-signal: oklch(0.60 0.19 35);
-  --color-caution: oklch(0.78 0.15 85);
-  --color-verified: oklch(0.52 0.12 155);
+  --color-proctor-navy: #0B1D39;
+  --color-proctor-blue: #123A63;
+  --color-proctor-slate: #2F5D8A;
+  --color-proctor-sky: #9CC7E6;
+  --color-proctor-cream: #F2E9DA;
+  --color-proctor-white: #FFFFFF;
 
-  --font-sans: var(--font-hanken-grotesk), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --color-ink: #0B1D39;
+  --color-ink-muted: #576375;
+  --color-paper: #FFFFFF;
+  --color-ground: #F8FAFC;
+  --color-rule: #E2E8F0;
+  --color-signal: #DC2626;
+  --color-caution: #D97706;
+  --color-verified: #059669;
+
+  --font-sans: var(--font-plus-jakarta-sans), var(--font-hanken-grotesk), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-serif: var(--font-source-serif), Georgia, Cambria, serif;
-  --font-mono: var(--font-ibm-plex-mono), Menlo, Monaco, Consolas, monospace;
+  --font-mono: var(--font-geist-mono), var(--font-ibm-plex-mono), Menlo, Monaco, Consolas, monospace;
+  --font-jakarta: var(--font-plus-jakarta-sans), sans-serif;
+  --font-geist: var(--font-geist-mono), monospace;
 
   --radius-xs: 2px;
 }
 
 :root {
-  --background: oklch(0.965 0.006 255);
-  --foreground: oklch(0.22 0.025 255);
+  --background: #F8FAFC;
+  --foreground: #0B1D39;
 }
 
 body {
@@ -29,6 +38,7 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
+
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
