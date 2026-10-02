@@ -16,6 +16,7 @@ import {
   Clock, 
   FileText
 } from 'lucide-react';
+import StudentCodeInput from './StudentCodeInput';
 
 
 
@@ -115,10 +116,10 @@ export default async function HomePage({
                 </button>
 
               </form>
-            ) : (
+            ) : session.user?.role === 'TEACHER' ? (
               <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-sm flex items-center justify-between gap-3 text-left">
                 <div>
-                  <div className="text-xs font-bold text-[#0B1D39] font-sans">Institutional Session Active</div>
+                  <div className="text-xs font-bold text-[#0B1D39] font-sans">Teacher Session Active</div>
                   <div className="text-[11px] font-mono text-[#576375] truncate">{session.user?.email}</div>
                 </div>
                 <Link
@@ -129,6 +130,8 @@ export default async function HomePage({
                   <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
+            ) : (
+              <StudentCodeInput initialCode={code || ''} userEmail={session.user?.email} variant="hero" />
             )}
           </div>
 
