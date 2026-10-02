@@ -134,7 +134,6 @@ export async function uploadMultipleToPastMaterialsAction(formData: FormData): P
       return { success: false, error: 'No files were uploaded.' };
     }
 
-    const validMimes = ['application/pdf', 'text/plain', 'image/png', 'image/jpeg', 'image/webp'];
     const addedMaterials: PastMaterialRecord[] = [];
 
     for (const file of files) {

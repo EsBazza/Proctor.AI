@@ -40,6 +40,7 @@ import {
 import type { ClassroomCourse, ClassroomStudent } from '@/lib/google-classroom';
 import type { PastMaterialRecord } from '@/lib/db';
 import { AIExamGenerationModal } from '@/components/AIExamGenerationModal';
+import { FormattedTime } from '@/components/ui/FormattedTime';
 
 export interface EnrolledStudentItem extends ClassroomStudent {
   isPresent: boolean;
@@ -1658,11 +1659,7 @@ export default function CreateExamPage() {
                                     {item.fileName}
                                   </div>
                                   <div className="text-[10px] text-ink-muted">
-                                    {new Date(item.createdAt).toLocaleDateString(undefined, {
-                                      month: 'short',
-                                      day: 'numeric',
-                                      year: 'numeric'
-                                    })}
+                                    <FormattedTime date={item.createdAt} format="date" />
                                   </div>
                                 </div>
                               </div>

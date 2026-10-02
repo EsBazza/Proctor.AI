@@ -139,13 +139,13 @@ export function ExamMonitoringTabs({
                   </td>
 
                   <td className="py-3 px-3 font-semibold text-ink tabular-nums whitespace-nowrap">
-                    {(student as any).totalScore !== null && (student as any).totalScore !== undefined
-                      ? `${(student as any).totalScore} / ${(student as any).maxPossibleScore || 100} pts`
+                    {student.totalScore !== null && student.totalScore !== undefined
+                      ? `${student.totalScore} / ${student.maxPossibleScore || 100} pts`
                       : '—'}
                   </td>
 
                   <td className="py-3 px-3 whitespace-nowrap">
-                    {student.integrityAlertsCount > 0 ? (
+                    {(student.integrityAlertsCount ?? 0) > 0 ? (
                       <BadgeMarker level="suspicious" label={`${student.integrityAlertsCount} Alert(s)`} />
                     ) : (
                       <BadgeMarker level="verified" label="Clean" />
@@ -154,9 +154,9 @@ export function ExamMonitoringTabs({
 
                   <td className="py-3 px-3.5 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1.5">
-                      {(student as any).accessToken && (
+                      {student.accessToken && (
                         <CopyStudentLinkButton
-                          accessToken={(student as any).accessToken}
+                          accessToken={student.accessToken}
                           studentName={student.studentName}
                         />
                       )}

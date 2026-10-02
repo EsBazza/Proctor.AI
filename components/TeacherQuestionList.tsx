@@ -9,11 +9,7 @@ import {
   CheckCircle2, 
   BrainCircuit, 
   Cpu, 
-  FileText, 
-  Sparkles, 
-  HelpCircle,
-  Columns,
-  ListFilter
+  HelpCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { QuestionEditorModal, QuestionData } from './QuestionEditorModal';
@@ -314,15 +310,18 @@ export function TeacherQuestionList({
       )}
 
       {/* Editor Modal */}
-      <QuestionEditorModal
-        isOpen={editorOpen}
-        onClose={() => setEditorOpen(false)}
-        examId={examId}
-        studentExamId={studentExamId}
-        studentName={studentName}
-        existingQuestion={editingQuestion}
-        onSuccess={handleRefresh}
-      />
+      {editorOpen && (
+        <QuestionEditorModal
+          key={editingQuestion?.id || 'new-question'}
+          isOpen={editorOpen}
+          onClose={() => setEditorOpen(false)}
+          examId={examId}
+          studentExamId={studentExamId}
+          studentName={studentName}
+          existingQuestion={editingQuestion}
+          onSuccess={handleRefresh}
+        />
+      )}
 
       {/* Delete Confirmation Modal */}
       {deletingQuestion && (

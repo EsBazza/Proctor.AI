@@ -593,7 +593,7 @@ export async function getTeacherExamPreviewAction(examId: string, studentExamId?
 export interface ManualQuestionPayload {
   type: string;
   prompt: string;
-  options?: any;
+  options?: unknown;
   correctAnswer: string;
   maxPoints: number;
   conceptTested?: string;

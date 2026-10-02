@@ -109,9 +109,10 @@ export function sanitizeJsonString(raw: string): string {
  * Safely parses JSON strings produced by LLMs or database records,
  * with automatic fallback sanitization to eliminate control-character errors.
  */
-export function safeJsonParse<T = any>(raw: string, fallback?: T): T {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function safeJsonParse<T = Record<string, any>>(raw: string, fallback?: T): T {
   if (!raw || typeof raw !== 'string') {
-    return fallback !== undefined ? (fallback as T) : (null as any);
+    return fallback !== undefined ? (fallback as T) : (null as unknown as T);
   }
   try {
     return JSON.parse(raw);

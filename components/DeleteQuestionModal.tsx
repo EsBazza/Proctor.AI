@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Trash2, AlertTriangle, Loader2 } from 'lucide-react';
+import { Trash2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { deleteQuestionAction } from '@/actions/exam';
 

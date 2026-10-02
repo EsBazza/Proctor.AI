@@ -57,7 +57,7 @@ export function IntegrityGuard({
   const [isBeingWatched, setIsBeingWatched] = useState(false);
   const [teacherNudgeMessage, setTeacherNudgeMessage] = useState<string | null>(null);
 
-  const realtimeChannelRef = useRef<any>(null);
+  const realtimeChannelRef = useRef<ReturnType<NonNullable<ReturnType<typeof getSupabaseClient>>['channel']> | null>(null);
   const frameSeqRef = useRef<number>(0);
   const isBeingWatchedRef = useRef(false);
 
@@ -400,7 +400,7 @@ export function IntegrityGuard({
         }
       }, 1000);
     },
-    [captureFrame, isLocked, isScreenSharing, onLockout, onViolation, playAlertChime, token, violationCount]
+    [captureFrame, isLocked, isScreenSharing, maxStrikes, onLockout, onViolation, playAlertChime, token, violationCount]
   );
 
   // Request Screen Share and Fullscreen

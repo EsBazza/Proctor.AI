@@ -88,28 +88,21 @@ export function AIExamGenerationModal({
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [currentStageIdx, setCurrentStageIdx] = useState(0);
   const [simulatedProgress, setSimulatedProgress] = useState(5);
-  const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setSecondsElapsed(0);
-      setCurrentStageIdx(0);
-      setSimulatedProgress(5);
-      setTerminalLogs([]);
-      return;
-    }
-
-    const startTime = Date.now();
-
-    // Initial log messages
+  const [terminalLogs, setTerminalLogs] = useState<string[]>(() => {
     const formattedTypes = questionTypes.join(', ');
-    setTerminalLogs([
+    return [
       `[00:00.1] [INITIALIZE] Initializing Gemini 3.5 Flash AI Engine...`,
       `[00:00.4] [PAYLOAD] Target: "${title || 'Assessment'}" | Subject: "${subject || 'General'}"`,
       `[00:00.8] [ROSTER] Roster loaded: ${candidateCount} candidates | ${questionCount} questions per exam`,
       `[00:01.2] [INTEGRITY] Proctored threshold set to ${maxStrikes} strikes per session.`,
       `[00:01.8] [ARCH] Configured question distribution: [${formattedTypes}]`
-    ]);
+    ];
+  });
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const startTime = Date.now();
 
     const timer = setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);

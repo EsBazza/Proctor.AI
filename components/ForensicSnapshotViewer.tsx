@@ -17,6 +17,7 @@ import {
 import { IntegrityLogRecord } from '@/lib/db';
 import { BadgeMarker, ThreatLevel } from '@/components/ui/BadgeMarker';
 import { Button } from '@/components/ui/Button';
+import { FormattedTime } from '@/components/ui/FormattedTime';
 import { getLiveExamIntegrityLogsAction } from '@/actions/exam';
 
 interface ForensicSnapshotViewerProps {
@@ -26,16 +27,18 @@ interface ForensicSnapshotViewerProps {
 
 export function ForensicSnapshotViewer({ logs, examId }: ForensicSnapshotViewerProps) {
   const [currentLogs, setCurrentLogs] = useState<(IntegrityLogRecord & { studentName?: string })[]>(logs);
+  const [prevLogsProp, setPrevLogsProp] = useState<(IntegrityLogRecord & { studentName?: string })[]>(logs);
   const [selectedLog, setSelectedLog] = useState<(IntegrityLogRecord & { studentName?: string }) | null>(null);
   const [activeFrameIndex, setActiveFrameIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(800);
   const [adjudicationStatus, setAdjudicationStatus] = useState<Record<string, 'DISMISSED' | 'CONFIRMED'>>({});
 
-  // Sync prop changes
-  useEffect(() => {
+  // If logs prop changed from server revalidation, adjust state during render
+  if (prevLogsProp !== logs) {
+    setPrevLogsProp(logs);
     setCurrentLogs(logs);
-  }, [logs]);
+  }
 
   // Live stream auto-sync (every 2.5s) without requiring manual page refresh
   useEffect(() => {
@@ -196,9 +199,11 @@ export function ForensicSnapshotViewer({ logs, examId }: ForensicSnapshotViewerP
                       [{status}]
                     </span>
                   ) : null}
-                  <span>
-                    {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                  </span>
+                  <FormattedTime
+                    date={log.timestamp}
+                    format="time"
+                    className="font-mono text-[11px] text-ink-muted"
+                  />
                 </div>
               </div>
 

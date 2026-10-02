@@ -4,6 +4,7 @@ import { getAllExamsAction } from '@/actions/exam';
 import { Plus, ArrowRight } from 'lucide-react';
 import { DeleteExamButton } from '@/components/DeleteExamButton';
 import { Button } from '@/components/ui/Button';
+import { FormattedTime } from '@/components/ui/FormattedTime';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,7 +98,7 @@ export default async function TeacherDashboardPage() {
                     {exam.language}
                   </td>
                   <td className="py-3 px-4 font-mono text-ink-muted whitespace-nowrap">
-                    {new Date(exam.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                    <FormattedTime date={exam.createdAt} format="date" />
                   </td>
                   <td className="py-3 px-4 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-2">

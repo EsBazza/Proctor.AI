@@ -7,16 +7,11 @@ import {
   Minimize2, 
   RefreshCw, 
   Lock, 
-  CheckCircle2, 
   AlertTriangle, 
   Eye, 
-  Clock, 
   Radio, 
-  Activity, 
   X, 
   ExternalLink,
-  ShieldAlert,
-  Loader2,
   Tv,
   ZoomIn,
   ZoomOut,
@@ -30,19 +25,22 @@ import {
 } from '@/actions/exam';
 import { UnlockStudentButton } from '@/components/UnlockStudentButton';
 import { getSupabaseClient } from '@/lib/supabase';
+import { FormattedTime } from '@/components/ui/FormattedTime';
 
 export interface StudentScreenItem {
   id: string;
   studentName: string;
-  studentEmail: string | null;
+  studentEmail?: string | null;
   accessToken?: string | null;
   status: string;
-  latestScreenFrame: string | null;
-  lastActiveAt: string | null;
-  currentQuestion: number | null;
-  strikeCount: number;
-  integrityAlertsCount: number;
-  isBeingWatched: boolean;
+  latestScreenFrame?: string | null;
+  lastActiveAt?: string | null;
+  currentQuestion?: number | null;
+  strikeCount?: number;
+  integrityAlertsCount?: number;
+  isBeingWatched?: boolean;
+  totalScore?: number | null;
+  maxPossibleScore?: number;
 }
 
 interface VeyonScreenGridProps {
@@ -65,12 +63,11 @@ export function VeyonScreenGrid({
   const [inspectedStudentId, setInspectedStudentId] = useState<string | null>(null);
   const [focusedStudent, setFocusedStudent] = useState<StudentScreenItem | null>(null);
   const [isFullscreenModal, setIsFullscreenModal] = useState(false);
-  const [focusedFrameKey, setFocusedFrameKey] = useState(0);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
 
   // Realtime Socket & Canvas Telemetry State
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const inspectChannelRef = useRef<any>(null);
+  const inspectChannelRef = useRef<ReturnType<NonNullable<ReturnType<typeof getSupabaseClient>>['channel']> | null>(null);
   const lastFrameSeqRef = useRef<number>(0);
   const lastFrameTimeRef = useRef<number>(0);
   const [frameAge, setFrameAge] = useState<number>(0);
@@ -147,12 +144,13 @@ export function VeyonScreenGrid({
   }, [focusedStudent?.latestScreenFrame, paintFrameToCanvas]);
 
   // Handle opening live inspection modal for a specific student
-  const handleOpenInspect = async (student: StudentScreenItem) => {
+  const handleOpenInspect = useCallback(async (student: StudentScreenItem) => {
+    const startTime = Date.now();
     setInspectedStudentId(student.id);
     setFocusedStudent(student);
     setZoomLevel(1);
     lastFrameSeqRef.current = 0;
-    lastFrameTimeRef.current = Date.now();
+    lastFrameTimeRef.current = startTime;
     setFrameAge(0);
     setStreamState('LIVE');
 
@@ -167,10 +165,12 @@ export function VeyonScreenGrid({
       inspectChannelRef.current = channel;
 
       channel
-        .on('broadcast', { event: 'screen_frame' }, async ({ payload }: { payload: any }) => {
+        .on('broadcast', { event: 'screen_frame' }, async ({ payload }: { payload: { frame?: string; seq?: number } }) => {
           if (!payload?.frame) return;
-          if (payload.seq && payload.seq <= lastFrameSeqRef.current) return;
-          lastFrameSeqRef.current = payload.seq;
+          if (typeof payload.seq === 'number') {
+            if (payload.seq <= lastFrameSeqRef.current) return;
+            lastFrameSeqRef.current = payload.seq;
+          }
           await paintFrameToCanvas(payload.frame);
         })
         .subscribe((status) => {
@@ -200,10 +200,10 @@ export function VeyonScreenGrid({
         paintFrameToCanvas(student.latestScreenFrame);
       }
     }
-  };
+  }, [paintFrameToCanvas]);
 
   // Handle closing live inspection modal
-  const handleCloseInspect = async () => {
+  const handleCloseInspect = useCallback(async () => {
     const studentIdToClose = inspectedStudentId;
     if (inspectChannelRef.current) {
       inspectChannelRef.current.send({
@@ -226,10 +226,10 @@ export function VeyonScreenGrid({
     setIsFullscreenModal(false);
     setZoomLevel(1);
     setIsNudgeOpen(false);
-  };
+  }, [inspectedStudentId]);
 
   // Send calm canned nudge message directly to student over realtime channel
-  const handleSendNudge = (message: string) => {
+  const handleSendNudge = useCallback((message: string) => {
     if (inspectChannelRef.current) {
       inspectChannelRef.current.send({
         type: 'broadcast',
@@ -240,7 +240,7 @@ export function VeyonScreenGrid({
     setIsNudgeOpen(false);
     setNudgeToast('Notice transmitted to candidate');
     setTimeout(() => setNudgeToast(null), 4000);
-  };
+  }, []);
 
   // Frame age calculator ticker (runs every 500ms while inspecting)
   useEffect(() => {
@@ -300,7 +300,7 @@ export function VeyonScreenGrid({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [inspectedStudentId]);
+  }, [inspectedStudentId, handleCloseInspect]);
 
   // Filter students
   const filteredStudents = students.filter((s) => {
@@ -409,7 +409,7 @@ export function VeyonScreenGrid({
                 className={`group relative rounded-[2px] border bg-paper text-xs overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-ink/60 flex flex-col justify-between ${
                   isLocked
                     ? 'border-signal/70 ring-1 ring-signal/30'
-                    : student.integrityAlertsCount > 0
+                    : (student.integrityAlertsCount ?? 0) > 0
                     ? 'border-amber-500/50'
                     : 'border-rule'
                 }`}
@@ -475,10 +475,10 @@ export function VeyonScreenGrid({
                   </div>
 
                   {/* Integrity Warning Badge if flagged */}
-                  {student.integrityAlertsCount > 0 && (
+                  {(student.integrityAlertsCount ?? 0) > 0 && (
                     <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-signal/90 backdrop-blur-sm text-paper text-[10px] font-bold font-mono flex items-center gap-1 shadow">
                       <AlertTriangle className="w-3 h-3 text-paper" />
-                      <span>{student.integrityAlertsCount} STRIKE{student.integrityAlertsCount > 1 ? 'S' : ''}</span>
+                      <span>{student.integrityAlertsCount} STRIKE{(student.integrityAlertsCount ?? 0) > 1 ? 'S' : ''}</span>
                     </div>
                   )}
                 </div>
@@ -487,7 +487,7 @@ export function VeyonScreenGrid({
                 <div className="p-2.5 bg-paper flex items-center justify-between text-[10px] font-mono text-ink-muted border-t border-rule">
                   <div>
                     {student.lastActiveAt ? (
-                      <span>Active: {new Date(student.lastActiveAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                      <span>Active: <FormattedTime date={student.lastActiveAt} format="time" /></span>
                     ) : (
                       <span>No pulse yet</span>
                     )}
@@ -665,7 +665,7 @@ export function VeyonScreenGrid({
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 gap-3 text-ink-muted">
                   <Monitor className="w-12 h-12 text-slate-700 animate-pulse" />
-                  <div className="text-sm text-ink font-medium">Waiting for candidate's screen transmission...</div>
+                  <div className="text-sm text-ink font-medium">Waiting for candidate&apos;s screen transmission...</div>
                   <div className="text-xs text-ink-muted font-mono">
                     Ensure student has accepted screen sharing on their browser.
                   </div>
@@ -706,12 +706,12 @@ export function VeyonScreenGrid({
                 </span>
                 <span>•</span>
                 <span>
-                  Strikes: <strong className={focusedStudent.strikeCount > 0 ? 'text-signal' : 'text-verified'}>{focusedStudent.strikeCount} / {maxStrikes}</strong>
+                  Strikes: <strong className={(focusedStudent.strikeCount ?? 0) > 0 ? 'text-signal' : 'text-verified'}>{focusedStudent.strikeCount ?? 0} / {maxStrikes}</strong>
                 </span>
                 {focusedStudent.lastActiveAt && (
                   <>
                     <span>•</span>
-                    <span>Last Stream Pulse: {new Date(focusedStudent.lastActiveAt).toLocaleTimeString()}</span>
+                    <span>Last Stream Pulse: <FormattedTime date={focusedStudent.lastActiveAt} format="time" /></span>
                   </>
                 )}
               </div>

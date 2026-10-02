@@ -5,19 +5,15 @@ import { getExamDetailsAction } from '@/actions/exam';
 import { CohortAnalytics } from '@/components/CohortAnalytics';
 import { 
   ArrowLeft,
-  Eye,
-  Lock
+  Eye
 } from 'lucide-react';
 import { PublishToClassroomButton } from '@/components/PublishToClassroomButton';
 import { ReleaseGradesButton } from '@/components/ReleaseGradesButton';
-import { UnlockStudentButton } from '@/components/UnlockStudentButton';
 import { ForensicSnapshotViewer } from '@/components/ForensicSnapshotViewer';
 import { DeleteExamButton } from '@/components/DeleteExamButton';
 import { CopyButton } from '@/components/CopyButton';
-import { CopyStudentLinkButton } from '@/components/CopyStudentLinkButton';
 import { ShareExamModal } from '@/components/ShareExamModal';
 import { AdjustLockoutModal } from '@/components/AdjustLockoutModal';
-import { BadgeMarker } from '@/components/ui/BadgeMarker';
 import { Button } from '@/components/ui/Button';
 import { ExamMonitoringTabs } from '@/components/ExamMonitoringTabs';
 
@@ -144,7 +140,7 @@ export default async function TeacherExamMonitorPage({
         <div className="lg:col-span-8 space-y-3">
           <ExamMonitoringTabs
             examId={exam.id}
-            students={students as any}
+            students={students}
             maxStrikes={exam.maxStrikes || 2}
           />
         </div>

@@ -1,17 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   X, 
-  Check, 
   Plus, 
   Trash2, 
-  HelpCircle, 
-  BookOpen, 
   CheckCircle2, 
-  Loader2,
-  Layers,
-  Sparkles
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { addManualQuestionAction, updateQuestionAction, ManualQuestionPayload } from '@/actions/exam';
@@ -21,6 +16,7 @@ export interface QuestionData {
   questionIndex?: number;
   type: string;
   prompt: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   options?: any;
   correctAnswer: string;
   maxPoints: number;
@@ -60,111 +56,89 @@ export function QuestionEditorModal({
 }: QuestionEditorModalProps) {
   const isEditing = !!existingQuestion?.id;
 
-  const [type, setType] = useState<string>('MCQ');
-  const [prompt, setPrompt] = useState('');
-  const [conceptTested, setConceptTested] = useState('');
-  const [difficulty, setDifficulty] = useState('MEDIUM');
-  const [maxPoints, setMaxPoints] = useState<number>(10);
+  const [type, setType] = useState<string>(() => existingQuestion?.type || 'MCQ');
+  const [prompt, setPrompt] = useState(() => existingQuestion?.prompt || '');
+  const [conceptTested, setConceptTested] = useState(() => existingQuestion?.conceptTested || '');
+  const [difficulty, setDifficulty] = useState(() => existingQuestion?.difficulty || 'MEDIUM');
+  const [maxPoints, setMaxPoints] = useState<number>(() => existingQuestion?.maxPoints || 10);
   const [applyToAllStudents, setApplyToAllStudents] = useState<boolean>(true);
 
   // MCQ specific state
-  const [mcqOptions, setMcqOptions] = useState<string[]>([
-    'A) ',
-    'B) ',
-    'C) ',
-    'D) '
-  ]);
-  const [mcqCorrectIndex, setMcqCorrectIndex] = useState<number>(0);
+  const [mcqOptions, setMcqOptions] = useState<string[]>(() => {
+    if (existingQuestion?.type === 'MCQ' && Array.isArray(existingQuestion.options)) {
+      return existingQuestion.options.map((o) => String(o));
+    }
+    return ['A) ', 'B) ', 'C) ', 'D) '];
+  });
+  const [mcqCorrectIndex, setMcqCorrectIndex] = useState<number>(() => {
+    if (existingQuestion?.type === 'MCQ' && Array.isArray(existingQuestion.options)) {
+      const opts = existingQuestion.options.map((o) => String(o));
+      const correctAns = existingQuestion.correctAnswer || '';
+      const foundIdx = opts.findIndex((o) => 
+        o.trim().toLowerCase() === correctAns.trim().toLowerCase() ||
+        o.trim().toLowerCase().startsWith(correctAns.trim().toLowerCase().charAt(0) + ')')
+      );
+      return foundIdx >= 0 ? foundIdx : 0;
+    }
+    return 0;
+  });
 
   // True/False state
-  const [tfCorrect, setTfCorrect] = useState<'TRUE' | 'FALSE'>('TRUE');
+  const [tfCorrect, setTfCorrect] = useState<'TRUE' | 'FALSE'>(() => {
+    if (existingQuestion?.type === 'TRUE_FALSE') {
+      return existingQuestion.correctAnswer?.toUpperCase().includes('TRUE') ? 'TRUE' : 'FALSE';
+    }
+    return 'TRUE';
+  });
 
   // Short Answer & Essay state
-  const [rubricText, setRubricText] = useState('');
+  const [rubricText, setRubricText] = useState(() => {
+    if (existingQuestion?.type === 'SHORT_ANSWER' || existingQuestion?.type === 'ESSAY') {
+      return existingQuestion.correctAnswer || '';
+    }
+    return '';
+  });
 
   // Fill in the Blank state
-  const [fillAnswer, setFillAnswer] = useState('');
+  const [fillAnswer, setFillAnswer] = useState(() => {
+    if (existingQuestion?.type === 'FILL_IN_BLANK') {
+      return existingQuestion.correctAnswer || '';
+    }
+    return '';
+  });
 
   // Identification state
-  const [identAnswer, setIdentAnswer] = useState('');
+  const [identAnswer, setIdentAnswer] = useState(() => {
+    if (existingQuestion?.type === 'IDENTIFICATION') {
+      return existingQuestion.correctAnswer || '';
+    }
+    return '';
+  });
 
   // Matching Type state
-  const [matchingPairs, setMatchingPairs] = useState<Array<{ colA: string; colB: string }>>([
-    { colA: '1. Term 1', colB: 'A. Definition 1' },
-    { colA: '2. Term 2', colB: 'B. Definition 2' },
-    { colA: '3. Term 3', colB: 'C. Definition 3' }
-  ]);
+  const [matchingPairs, setMatchingPairs] = useState<Array<{ colA: string; colB: string }>>(() => {
+    if (existingQuestion?.type === 'MATCHING' && existingQuestion.options && typeof existingQuestion.options === 'object') {
+      const optsObj = existingQuestion.options as { columnA?: string[]; columnB?: string[] };
+      const colA = optsObj.columnA || [];
+      const colB = optsObj.columnB || [];
+      const pairs = [];
+      for (let i = 0; i < Math.max(colA.length, colB.length); i++) {
+        pairs.push({
+          colA: colA[i] || `${i + 1}. `,
+          colB: colB[i] || `${String.fromCharCode(65 + i)}. `
+        });
+      }
+      if (pairs.length > 0) return pairs;
+    }
+    return [
+      { colA: '1. Term 1', colB: 'A. Definition 1' },
+      { colA: '2. Term 2', colB: 'B. Definition 2' },
+      { colA: '3. Term 3', colB: 'C. Definition 3' }
+    ];
+  });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Initialize form when opening or editing
-  useEffect(() => {
-    if (!isOpen) return;
-
-    if (existingQuestion) {
-      setType(existingQuestion.type || 'MCQ');
-      setPrompt(existingQuestion.prompt || '');
-      setConceptTested(existingQuestion.conceptTested || '');
-      setDifficulty(existingQuestion.difficulty || 'MEDIUM');
-      setMaxPoints(existingQuestion.maxPoints || 10);
-      setRubricText(existingQuestion.correctAnswer || '');
-
-      // Parse existing options based on type
-      if (existingQuestion.type === 'MCQ') {
-        let opts = ['A) ', 'B) ', 'C) ', 'D) '];
-        if (Array.isArray(existingQuestion.options)) {
-          opts = existingQuestion.options.map((o) => String(o));
-        }
-        setMcqOptions(opts);
-        const correctAns = existingQuestion.correctAnswer || '';
-        const foundIdx = opts.findIndex((o) => 
-          o.trim().toLowerCase() === correctAns.trim().toLowerCase() ||
-          o.trim().toLowerCase().startsWith(correctAns.trim().toLowerCase().charAt(0) + ')')
-        );
-        setMcqCorrectIndex(foundIdx >= 0 ? foundIdx : 0);
-      } else if (existingQuestion.type === 'TRUE_FALSE') {
-        const isTrue = existingQuestion.correctAnswer?.toUpperCase().includes('TRUE');
-        setTfCorrect(isTrue ? 'TRUE' : 'FALSE');
-      } else if (existingQuestion.type === 'FILL_IN_BLANK') {
-        setFillAnswer(existingQuestion.correctAnswer || '');
-      } else if (existingQuestion.type === 'IDENTIFICATION') {
-        setIdentAnswer(existingQuestion.correctAnswer || '');
-      } else if (existingQuestion.type === 'MATCHING') {
-        if (existingQuestion.options && typeof existingQuestion.options === 'object') {
-          const colA = existingQuestion.options.columnA || [];
-          const colB = existingQuestion.options.columnB || [];
-          const pairs = [];
-          for (let i = 0; i < Math.max(colA.length, colB.length); i++) {
-            pairs.push({
-              colA: colA[i] || `${i + 1}. `,
-              colB: colB[i] || `${String.fromCharCode(65 + i)}. `
-            });
-          }
-          if (pairs.length > 0) setMatchingPairs(pairs);
-        }
-      }
-    } else {
-      // Default new question
-      setType('MCQ');
-      setPrompt('');
-      setConceptTested('Core Learning Objective');
-      setDifficulty('MEDIUM');
-      setMaxPoints(10);
-      setMcqOptions(['A) ', 'B) ', 'C) ', 'D) ']);
-      setMcqCorrectIndex(0);
-      setTfCorrect('TRUE');
-      setRubricText('');
-      setFillAnswer('');
-      setIdentAnswer('');
-      setMatchingPairs([
-        { colA: '1. Term 1', colB: 'A. Definition 1' },
-        { colA: '2. Term 2', colB: 'B. Definition 2' },
-        { colA: '3. Term 3', colB: 'C. Definition 3' }
-      ]);
-    }
-    setError(null);
-  }, [isOpen, existingQuestion]);
 
   if (!isOpen) return null;
 
@@ -178,7 +152,7 @@ export function QuestionEditorModal({
     setIsSubmitting(true);
     setError(null);
 
-    let finalOptions: any = null;
+    let finalOptions: unknown = null;
     let finalCorrectAnswer = '';
 
     if (type === 'MCQ') {

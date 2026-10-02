@@ -4,8 +4,6 @@ import { notFound } from 'next/navigation';
 import { getTeacherExamPreviewAction } from '@/actions/exam';
 import { 
   ArrowLeft, 
-  BrainCircuit, 
-  CheckCircle2, 
   ChevronLeft, 
   ChevronRight, 
   ExternalLink, 
@@ -13,7 +11,7 @@ import {
   GraduationCap, 
   Key, 
   ShieldCheck, 
-  Cpu, Users,
+  Users,
   Clock,
   Globe,
   Shield
